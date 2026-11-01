@@ -1,0 +1,13 @@
+[Unit]
+Description=Al Día rent agent
+After=network-online.target
+
+[Service]
+ExecStart=/home/agent/agent/wallet-venv/bin/python -I /home/agent/agent/products/celo-openrails/aldia/agent/loop.py
+Restart=on-failure
+RestartSec=20
+StandardOutput=append:/home/agent/agent/products/celo-openrails/aldia/state/agent.log
+StandardError=append:/home/agent/agent/products/celo-openrails/aldia/state/agent.log
+
+[Install]
+WantedBy=default.target

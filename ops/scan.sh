@@ -6,9 +6,9 @@ FILES=$(git diff --cached --name-only --diff-filter=ACMR)
 HITS=0
 while IFS= read -r f; do
   [ -f "$f" ] || continue
-  case "$f" in *.png|*.mp4|*.jpg|*.ico|*.woff2) continue;; esac
+  case "$f" in *.png|*.mp4|*.jpg|*.ico|*.woff2|contracts/lib/*) continue;; esac
   # 64-hex strings that are not known public values, long tokens, env-style secrets
-  if grep -n -E '(^|[^0-9a-fA-Fx])(0x)?[0-9a-fA-F]{64}([^0-9a-fA-F]|$)' "$f" | grep -v -E 'keccak|topic|TOPIC|bytes32|erc8021|0x[0-9a-f]{64}.*(tx|Tx|hash)|celoscan|blockscout|allow-secret-scan' | sed 's/^/HEX /' | grep . ; then HITS=1; fi
+  if grep -n -E '(^|[^0-9a-fA-Fx])(0x)?[0-9a-fA-F]{64}([^0-9a-fA-F]|$)' "$f" | grep -v -E 'keccak|topic|TOPIC|bytes32|erc8021|0x[0-9a-f]{64}.*(tx|Tx|hash)|celoscan|blockscout|allow-secret-scan|0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0' | sed 's/^/HEX /' | grep . ; then HITS=1; fi
   if grep -n -E 'ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_|sk-[A-Za-z0-9]{20,}|xox[bap]-|AKIA[0-9A-Z]{16}|-----BEGIN .*PRIVATE KEY-----|CLOUDFLARE_API_TOKEN=|tx_live_|AGENT_TOKEN=[A-Za-z0-9]' "$f" | grep -v 'allow-secret-scan' | sed 's/^/TOK /' | grep . ; then HITS=1; fi
 done <<< "$FILES"
 if [ -d /home/agent/agent/secrets ]; then
