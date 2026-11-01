@@ -2,12 +2,14 @@
 import json
 import urllib.request
 
+from envfile import read_env
+
 BASE = "https://aldia.swiftbotlab.workers.dev"
 ENV = "/home/agent/agent/secrets/aldia_worker.env"
 
 
 def _token():
-    return open(ENV).read().split("=", 1)[1].strip()
+    return read_env(ENV, "AGENT_TOKEN")
 
 
 def call(method, path, body=None, timeout=30):

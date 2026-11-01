@@ -66,7 +66,8 @@ def open_lease(raw):
     t = valid_terms(raw)
     lease = {"id": raw["id"], "terms": t, "createdAt": raw["createdAt"], "termsHash": terms_hash(t).hex(),
              "salt": keccak(text="aldia:" + raw["id"]).hex(), "deployed": False, "charges": {}, "payments": [],
-             "builderTest": t["payout"].lower() in OUR_WALLETS}
+             "builderTest": t["payout"].lower() in OUR_WALLETS, "keyPrefix": raw.get("keyHash", "")[:20],
+             "contractRef": raw.get("contractRef")}
     data = celo.sel("predict(address,uint16,uint16,uint16,bytes32,bytes32)") + encode(ARGS, _lease_args(lease))
     lease["collector"] = to_checksum_address("0x" + celo.eth_call(FACTORY, data)[-20:].hex())
     return lease
@@ -243,7 +244,7 @@ def public_view(lease):
             "feeBps": FEE_BPS, "nextAdjustment": next_adj, "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "current": None, "history": []}
     if cur:
-        view["current"] = {k: cur.get(k) for k in ("month", "amount", "dueDate", "status", "received", "detail")}
+        view["current"] = {k: cur.get(k) for k in ("month", "amount", "dueDate", "status", "received", "detail", "clauseCheck")}
     view["history"] = [{"month": m, "amount": c.get("amount"), "status": c["status"]} for m, c in sorted(charges.items(), reverse=True) if c.get("amount")]
     return view
 
@@ -253,3 +254,24 @@ def repair_first_payment(lease, tx, frm, amount):
     keeps its empty list; the payment is recorded next to it, so the published hash still matches what went onchain."""
     lease["payments"].append({"tx": tx, "from": frm, "amount": amount, "ours": frm.lower() in OUR_WALLETS, "month": "2026-11"})
     lease.setdefault("settledPayments", []).append(tx)
+
+
+def ars(n):
+    return "$ " + f"{n:,}".replace(",", ".")
+
+
+MONTHS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+
+
+def month_name(ym):
+    return MONTHS[int(ym[5:7]) - 1]
+
+
+def status_text(lease):
+    month = ar_month()
+    c = lease["charges"].get(month)
+    label = lease["terms"]["propertyLabel"]
+    if not c or not c.get("amount"):
+        return f"{label}: todavía no hay monto para {month_name(month)}."
+    st = {"pagado": "ya está pagado", "pendiente": f"vence el {int(c['dueDate'][8:])}", "vencido": "está vencido", "parcial": "tiene un pago parcial"}.get(c["status"], c["status"])
+    return f"{label}: el alquiler de {month_name(month)} es {ars(c['amount'])} y {st}."

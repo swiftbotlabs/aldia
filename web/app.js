@@ -27,6 +27,7 @@ function h(tag, attrs, ...kids) {
 const ars = (n) => new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n);
 const pctf = (n, d = 2) => new Intl.NumberFormat("es-AR", { maximumFractionDigits: d, minimumFractionDigits: 0 }).format(n) + " %";
 const usd = (n) => "US$ " + new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2, minimumFractionDigits: 2 }).format(n);
+const usd3 = (n) => "US$ " + new Intl.NumberFormat("es-AR", { maximumFractionDigits: 4, minimumFractionDigits: 2 }).format(n);
 const monthName = (ym, year = true) =>
   new Intl.DateTimeFormat("es-AR", { month: "long", ...(year ? { year: "numeric" } : {}), timeZone: "UTC" }).format(new Date(ym + "-15T00:00:00Z"));
 const dayMonth = (d) => new Intl.DateTimeFormat("es-AR", { day: "numeric", month: "long", timeZone: "UTC" }).format(new Date(d + "T12:00:00Z"));
@@ -119,7 +120,7 @@ function explainRent(r, lease) {
   const rows = [["Monto inicial", ars(r.baseRent)], ["Aumento acumulado", "+" + pctf(r.pct)]];
   if (r.stepPct !== undefined) rows.push(["Último aumento", "+" + pctf(r.stepPct)]);
   if (r.monthsUsed) rows.push(["Meses de IPC usados", r.monthsUsed.map((m) => monthName(m, false)).join(", ") + " " + r.monthsUsed.at(-1).slice(0, 4)]);
-  if (r.index === "ICL") rows.push(["ICL usado", `${r.levelFrom} → ${r.levelTo}`]);
+  if (r.index === "ICL") rows.push(["ICL usado", `${String(r.levelFrom).replace(".", ",")} → ${String(r.levelTo).replace(".", ",")}`]);
   return h("div", {},
     h("dl", { class: "kv" }, rows.map(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])),
     r.index === "IPC" ? h("p", { class: "small muted", style: "margin-top:10px" }, "Fuente: ", h("a", { href: INDEC_PAGE, rel: "noopener" }, "INDEC, IPC nivel general nacional"), ".") : null,
@@ -295,6 +296,7 @@ function viewNew() {
         const f = res.fields || {};
         for (const k of ["startDate", "dueDay", "index", "periodMonths", "fixedPct"]) if (f[k] !== undefined && f[k] !== null) s[k] = f[k];
         if (f.baseRent) s.baseRent = String(f.baseRent);
+        s.contractRef = res.rid || rid;
         saveDraft(s);
         draw();
         root.prepend(h("div", { class: "note" }, "Listo. Completamos lo que encontramos: revisá cada dato contra tu contrato antes de seguir."));
@@ -346,6 +348,11 @@ function viewNew() {
       h("div", { class: "card" },
         h("h3", {}, "¿Dónde recibís?"),
         h("p", { class: "small muted" }, "Tu dirección en la red Celo. Empieza con 0x. La sacás de MiniPay, Valora o MetaMask, y solo vos tenés acceso."),
+        h("details", {}, h("summary", {}, "No tengo billetera"),
+          h("ol", { class: "small muted" },
+            h("li", {}, "Instalá Valora o MetaMask en tu teléfono. Si ya usás Opera Mini, MiniPay viene incluida."),
+            h("li", {}, "Creá tu billetera y guardá la frase de recuperación en papel. Nadie más la tiene que ver."),
+            h("li", {}, "Copiá tu dirección, la que empieza con 0x, y pegala acá abajo. Sirve para la red Celo."))),
         connect,
         field("Dirección de tu billetera", h("input", { value: s.payout, autocomplete: "off", spellcheck: "false", placeholder: "0x…", class: "mono", oninput: (e) => { s.payout = e.target.value.trim(); } }), null, "payout", errors),
         h("p", { class: "tiny", style: "margin:10px 0 0" }, "Revisala dos veces. Esta dirección queda escrita en la cuenta del contrato y el agente no la puede cambiar.")),
@@ -414,6 +421,12 @@ function statusChip(st) {
 function testBanner(pub) {
   return pub.builderTest ? h("div", { class: "note warn" }, "Este es un contrato de prueba de Swift Bot Labs para mostrar el producto. No hay propietario ni inquilino reales.") : null;
 }
+const BOT = "https://t.me/AlDiaAvisosBot";
+async function sha256Hex(text) {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+const clauseNote = (c) => (c && c.clauseCheck ? h("p", { class: "small", style: "margin:10px 0 0" }, c.clauseCheck.ok ? "Revisamos este aumento contra la cláusula del contrato: coincide." : "Ojo: este aumento podría no coincidir con la cláusula del contrato. ", c.clauseCheck.ok ? null : c.clauseCheck.note) : null);
 const rampUrl = (amount, address) => `https://ramp.ripio.com/?country=AR&chain=42220&token=WARS&amount=${amount}&address=${address}`;
 
 async function payWithWallet(pub, status) {
@@ -461,12 +474,14 @@ async function viewPay(id) {
       open ? h("p", { class: "muted" }, `Vence el ${dayMonth(c.dueDate)}.`) : null,
       c.received && open ? h("p", { class: "small" }, `Ya recibimos ${ars(c.received)} de ${ars(c.amount)}.`) : null,
       h("details", { open: c.detail && c.detail.adjustments > 0 && c.detail.adjustmentMonth === c.month }, h("summary", {}, "¿Por qué este monto?"), explainRent(c.detail, pub)),
+      clauseNote(c),
       pub.nextAdjustment ? h("p", { class: "small muted", style: "margin:10px 0 0" }, `Próximo aumento: ${monthName(pub.nextAdjustment)}.`) : null) : null,
     open ? h("section", {},
       h("a", { class: "btn block", href: rampUrl(owed, pub.collector), rel: "noopener" }, "Pagar por transferencia"),
       h("p", { class: "small muted", style: "margin-top:8px" }, "Te lleva a Ripio. Pagás en pesos desde tu banco o billetera y el pago llega directo a la cuenta de este alquiler. La primera vez Ripio te pide validar tu identidad."),
       window.ethereum ? h("button", { class: "btn ghost block", type: "button", onclick: () => payWithWallet(pub, status).catch(() => status.replaceChildren(h("div", { class: "note warn" }, "No se pudo enviar el pago."))) }, "Pagar con wARS desde esta billetera") : null,
-      status) : null,
+      status,
+      h("a", { class: "btn ghost block", style: "margin-top:10px", href: `${BOT}?start=t_${id}`, rel: "noopener" }, "Avisame por Telegram cuando venza")) : null,
     pub.history && pub.history.some((x) => x.status === "pagado") ? h("section", { class: "card" },
       h("h3", {}, "Recibos"),
       h("table", {}, pub.history.filter((x) => x.status === "pagado").map((x) => h("tr", {},
@@ -531,6 +546,7 @@ async function viewPanel(id) {
       h("div", { class: "amount" }, ars(c.amount)),
       c.received ? h("p", { class: "small" }, `Recibido: ${ars(c.received)}.`) : null,
       h("details", {}, h("summary", {}, "Cómo se calculó"), explainRent(c.detail, t)),
+      clauseNote(c),
       pub.nextAdjustment ? h("p", { class: "small muted", style: "margin:10px 0 0" }, `Próximo aumento: ${monthName(pub.nextAdjustment)}.`) : null) : null,
     h("section", { class: "card" },
       h("h3", {}, "Mandale el link a tu inquilino"),
@@ -538,6 +554,10 @@ async function viewPanel(id) {
       h("div", { class: "row" },
         h("a", { class: "btn wa", style: "flex:1", href: `https://wa.me/?text=${encodeURIComponent(msg)}`, rel: "noopener" }, "Mandar por WhatsApp"),
         copyBtn)),
+    h("section", { class: "card" },
+      h("h3", {}, "Avisos"),
+      h("p", { class: "small muted" }, "Te escribimos cuando entra un pago, cuando cambia el monto o si algo se atrasa."),
+      h("a", { class: "btn ghost block", href: `${BOT}?start=l_${id}_${(await sha256Hex(token)).slice(0, 20)}`, rel: "noopener" }, "Recibir avisos por Telegram")),
     h("section", { class: "card" },
       h("h3", {}, "Cómo cobrás"),
       h("dl", { class: "kv" },
@@ -577,11 +597,12 @@ async function viewReceipt(id, month) {
       h("div", { class: "amount" }, ars(r.received)),
       h("dl", { class: "kv" },
         h("dt", {}, "Alquiler del mes"), h("dd", {}, ars(r.amount)),
-        h("dt", {}, "Cobrado el"), h("dd", {}, r.paidAt.slice(0, 10)),
+        h("dt", {}, "Cobrado el"), h("dd", {}, dayMonth(r.paidAt.slice(0, 10))),
         h("dt", {}, "Comisión Al Día"), h("dd", {}, ars(r.fee)),
         h("dt", {}, "Al propietario en pesos"), h("dd", {}, ars(r.pesoToLandlord)),
         h("dt", {}, "Al propietario en dólares"), h("dd", {}, r.dollarToLandlord ? usd(r.dollarToLandlord) : "—"),
-        r.rate ? h("dt", {}, "Tipo de cambio") : null, r.rate ? h("dd", {}, `$ ${r.rate} por USD₮ (${r.route})`) : null),
+        r.rate ? h("dt", {}, "Tipo de cambio") : null, r.rate ? h("dd", {}, `${new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", minimumFractionDigits: 2 }).format(r.rate)} por USD₮`) : null,
+        r.rate ? h("dt", {}, "Convertido en") : null, r.rate ? h("dd", {}, r.route) : null),
       h("details", { open: true }, h("summary", {}, "Cómo se calculó el monto"), explainRent(r.detail, r)),
       h("p", { class: "small muted", style: "margin-top:14px" }, "Comprobantes en la red Celo: ",
         [...r.paymentTxs, ...(r.paymentTxsLate || [])].map((t, i) => [h("a", { href: TX_URL(t), rel: "noopener" }, "pago " + (i + 1)), ", "]),
@@ -629,8 +650,8 @@ async function viewTransparency() {
       s.leases && s.leases.length ? h("table", { style: "margin-top:10px" }, s.leases.map((l) => h("tr", {}, h("td", {}, l.label), h("td", { class: "r" }, l.kind)))) : null),
     s.paidCalls ? h("section", { class: "card" },
       h("h3", {}, "Servicios que pagamos"),
-      h("p", { class: "small muted" }, `${s.paidCalls.count} llamadas pagas por x402 en Celo, por ${usd(s.paidCalls.usd)} en total.`),
-      h("table", {}, s.paidCalls.recent.map((c) => h("tr", {}, h("td", {}, c.service), h("td", { class: "r" }, usd(c.usd)), h("td", { class: "r" }, c.tx ? h("a", { href: TX_URL(c.tx), rel: "noopener" }, "tx") : "—"))))) : null);
+      h("p", { class: "small muted" }, `${s.paidCalls.count} llamadas pagas por x402 en Celo, por ${usd3(s.paidCalls.usd)} en total, desde la billetera del agente.`),
+      h("table", {}, s.paidCalls.recent.map((c) => h("tr", {}, h("td", {}, c.service), h("td", { class: "r" }, usd3(c.usd)), h("td", { class: "r" }, c.tx ? h("a", { href: TX_URL(c.tx), rel: "noopener" }, "tx") : "—"))))) : null);
 }
 
 /* ---------- Router ---------- */

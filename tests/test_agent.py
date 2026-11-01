@@ -50,6 +50,25 @@ class Indices(unittest.TestCase):
             indices.parse_indec("Codigo;Otra;Cosa\n".encode("latin-1"))
 
 
+class EnvFile(unittest.TestCase):
+    def test_errors_name_the_key_and_never_the_value(self):
+        import envfile, tempfile, traceback
+        secret = "9163:ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "x.env")
+            fd = os.open(p, os.O_WRONLY | os.O_CREAT, 0o600)
+            os.write(fd, f"BOT_TOKEN={secret}\nBOT_USERNAME=x\n".encode())
+            os.close(fd)
+            self.assertEqual(envfile.read_env(p, "BOT_TOKEN"), secret)
+            try:
+                envfile.read_env(p, "OTHER")
+            except envfile.EnvFileError:
+                self.assertNotIn(secret, traceback.format_exc())
+            os.chmod(p, 0o644)                                  # positive control: a loose file is refused
+            with self.assertRaises(envfile.EnvFileError):
+                envfile.read_env(p, "BOT_TOKEN")
+
+
 class Reader(unittest.TestCase):
     def test_only_valid_fields_survive(self):
         good = {"baseRent": 550000, "startDate": "2026-03-01", "dueDay": 10, "index": "IPC", "periodMonths": 4}

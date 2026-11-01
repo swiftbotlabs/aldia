@@ -116,9 +116,10 @@ export function validateLease(b, today = new Date()) {
   if (!/^0x[0-9a-fA-F]{40}$/.test(payout) || /^0x0{40}$/.test(payout)) {
     errors.payout = "Esa dirección no parece válida. Tiene que empezar con 0x y tener 42 caracteres.";
   }
+  const contractRef = /^[0-9a-f]{16}$/.test(String(b.contractRef || "")) ? b.contractRef : null;
   if (Object.keys(errors).length) return { errors };
   return {
-    lease: { propertyLabel, tenantLabel, baseRent, startDate, dueDay, index, periodMonths, lagMonths, fixedPct, sweepBps, payout },
+    lease: { propertyLabel, tenantLabel, baseRent, startDate, dueDay, index, periodMonths, lagMonths, fixedPct, sweepBps, payout, contractRef },
   };
 }
 

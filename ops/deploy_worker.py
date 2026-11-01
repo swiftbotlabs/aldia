@@ -3,6 +3,8 @@ from secrets/ and sent only to Cloudflare; nothing secret is printed."""
 import base64, json, os, secrets as pysecrets, stat, sys, time, uuid
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cf
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "agent"))
+from envfile import read_env
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NAME = "aldia"
@@ -16,10 +18,7 @@ def agent_token():
         fd = os.open(ENV, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "w") as f:
             f.write("AGENT_TOKEN=" + pysecrets.token_hex(32) + "\n")
-    st = os.lstat(ENV)
-    if st.st_mode & 0o077:
-        sys.exit("aldia_worker.env must be 0600")
-    return open(ENV).read().split("=", 1)[1].strip()
+    return read_env(ENV, "AGENT_TOKEN")
 
 
 def namespace():

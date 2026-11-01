@@ -13,6 +13,7 @@ import time
 import urllib.error
 import urllib.request
 
+import rlp
 from eth_account import Account
 from eth_utils import keccak, to_checksum_address
 
@@ -28,6 +29,7 @@ TX_LOG = os.path.join(STATE_DIR, "txlog.jsonl")
 
 # Stablecoin gas (CIP-64): the fee-currency adapter for USD₮, 18-decimal view of the 6-decimal token.
 USDT_FEE_ADAPTER = "0x0E2A3e05bc9A16F5292A6170456A710cb89C6f72"
+MAX_USDT_FEE_18 = 5 * 10**16       # $0.05 per transaction, in the adapter's 18-decimal units
 
 
 def erc8021_suffix(code=TAG):
@@ -108,7 +110,11 @@ class TaggedSender:
             return data
         return data + SUFFIX
 
-    def send(self, to, data=b"", value=0, note="", gas_margin=1.25, wait_s=90):
+    def send(self, to, data=b"", value=0, note="", gas_margin=1.25, wait_s=90, fee_in_usdt=False):
+        """Signs and sends one tagged transaction. With fee_in_usdt the gas is paid in USD₮ through Celo's fee abstraction
+        (a CIP-64 transaction, type 0x7b), so the agent keeps working without holding CELO."""
+        if fee_in_usdt:
+            return self._send_cip64(to, data, value, note, gas_margin, wait_s)
         data = self._tagged(data)
         if not data.endswith(SUFFIX):       # belt and braces: nothing untagged is ever signed
             raise RuntimeError("refusing to sign an untagged transaction")
@@ -140,6 +146,31 @@ class TaggedSender:
                     raise
             rc = self._wait(h, wait_s)
             self._log(h, to, note, rc)
+            return h, rc
+
+    def _send_cip64(self, to, data, value, note, gas_margin, wait_s):
+        data = self._tagged(data)
+        if not data.endswith(SUFFIX) or not to:
+            raise RuntimeError("refusing to sign an untagged or contract-creating fee-currency transaction")
+        to = to_checksum_address(to)
+        with open(LOCK_FILE, "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            price = int(rpc("eth_gasPrice", [USDT_FEE_ADAPTER]), 16)
+            tip = int(rpc("eth_maxPriorityFeePerGas", [USDT_FEE_ADAPTER]), 16)
+            max_fee = 2 * price + tip
+            call = {"from": self.address, "to": to, "data": "0x" + data.hex(), "value": hex(value), "feeCurrency": USDT_FEE_ADAPTER}
+            gas = int(int(rpc("eth_estimateGas", [call]), 16) * gas_margin) + 60000       # the fee debit and credit cost gas too
+            if gas * max_fee > MAX_USDT_FEE_18:
+                raise RpcError("stablecoin gas cost above the per-transaction ceiling")
+            nonce = int(rpc("eth_getTransactionCount", [self.address, "pending"]), 16)
+            fields = [CHAIN_ID, nonce, tip, max_fee, gas, bytes.fromhex(to[2:]), value, data, [], bytes.fromhex(USDT_FEE_ADAPTER[2:])]
+            sig = self.acct.unsafe_sign_hash(keccak(b"\x7b" + rlp.encode(fields)))
+            parity = sig.v - 27 if sig.v >= 27 else sig.v
+            raw = b"\x7b" + rlp.encode(fields + [parity, sig.r, sig.s])
+            h = "0x" + keccak(raw).hex()
+            rpc("eth_sendRawTransaction", ["0x" + raw.hex()], tries=1)
+            rc = self._wait(h, wait_s)
+            self._log(h, to, note + " (gas in USD₮)", rc)
             return h, rc
 
     @staticmethod
