@@ -1,0 +1,15 @@
+# secrets and state never go in this repo
+private/
+state/
+*.key
+*.env
+.dev.vars
+node_modules/
+__pycache__/
+*.pyc
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+tmp/
+*.log
+*.bak-*
