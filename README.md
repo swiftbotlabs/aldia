@@ -6,6 +6,8 @@ A small landlord in Argentina loads a rental contract once. Every month the agen
 
 Live: **https://aldia.swiftbotlab.workers.dev** (in Argentine Spanish, built for a phone)
 
+Demo video: **https://youtu.be/DmCQoeQxLME** (1:34)
+
 <img src="docs/tenant.png" alt="The page a tenant opens: this month's rent, why it is that amount, and how to pay" width="300">
 
 ## Who it is for
