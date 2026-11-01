@@ -18,7 +18,8 @@ TOPIC_SETTLED = "0x" + keccak(text="RentSettled(uint64,uint256,uint256,uint256,u
 FEE_BPS = 30
 MAX_SLIPPAGE_BPS = 100
 PAID_TOLERANCE = 0.98     # Ripio can deliver a hair under the requested pesos
-OUR_WALLETS = {"0xed120aec2240a25125b3f32eb8bff9c5f688121b"}
+OUR_WALLETS = {"0xed120aec2240a25125b3f32eb8bff9c5f688121b",   # agent wallet
+               "0x8ee66fcd89e2cb492b9b19b1380d93e792df9aaa"}   # builder-test landlord
 ROUTE = {"none": 0, "uniswap": 1, "textile": 2}
 ROUTE_NAME = {0: "sin conversión", 1: "Uniswap", 2: "Textile FX"}
 
@@ -132,7 +133,19 @@ def ensure_deployed(lease, sender):
 
 
 def read_uint(addr, sig, *args_bytes):
-    return int.from_bytes(celo.eth_call(addr, celo.sel(sig) + b"".join(args_bytes)), "big")
+    """A read can land on a node a block behind a contract we just deployed, and come back empty. Empty is not zero."""
+    for i in range(6):
+        raw = celo.eth_call(addr, celo.sel(sig) + b"".join(args_bytes))
+        if raw:
+            return int.from_bytes(raw, "big")
+        time.sleep(2)
+    raise RuntimeError(f"empty reply from {addr} {sig}")
+
+
+def force_textile():
+    """Builder-test leases listed here take the Textile route even when Uniswap is a hair better, to exercise that path."""
+    p = os.path.join(celo.STATE_DIR, "force_textile.json")
+    return json.load(open(p)) if os.path.exists(p) else []
 
 
 def plan_route(lease, sender, sweep):
@@ -146,10 +159,11 @@ def plan_route(lease, sender, sweep):
         pass
     tex_prev = market.textile_preview(market.WARS, market.USDT, sweep)
     note = {"floor": floor, "uniswap": uni, "textilePreview": tex_prev}
-    if tex_prev and tex_prev >= uni and tex_prev >= floor:
+    force = lease["builderTest"] and lease["id"] in force_textile()
+    if tex_prev and tex_prev >= floor and (tex_prev >= uni or force):
         firm = market.textile_firm(c, sender.acct, market.WARS, market.USDT, sweep)
         note["textileFirm"] = {k: firm.get(k) for k in ("ok", "buyAmount", "reason", "rfqId")}
-        if firm.get("ok") and firm["buyAmount"] >= floor and firm["buyAmount"] >= uni:
+        if firm.get("ok") and firm["buyAmount"] >= floor and (firm["buyAmount"] >= uni or force):
             return "textile", firm["buyAmount"], bytes.fromhex(firm["swapData"][2:]), note
     if uni >= floor:
         return "uniswap", (uni * 9990) // 10000, b"", note
@@ -162,7 +176,7 @@ def settle(lease, month, sender):
     ensure_deployed(lease, sender)
     addr = lease["collector"]
     if read_uint(addr, "agent()") == 0:
-        lease["closed"] = True
+        lease["closed"] = True      # the landlord removed the agent; their funds stay theirs to withdraw
         return None
     held = celo.erc20_balance(market.WARS, addr)
     sweep_bps = read_uint(addr, "sweepBps()")
@@ -170,8 +184,11 @@ def settle(lease, month, sender):
     fee = held * fee_bps // 10000
     sweep = (held - fee) * sweep_bps // 10000
     route, min_out, call, note = ("none", 0, b"", {})
-    if sweep > 0:
+    # The agent wallet must not receive dollars from a sweep. A lease paying it only ever settles in pesos.
+    if sweep > 0 and lease["terms"]["payout"].lower() != sender.address.lower():
         route, min_out, call, note = plan_route(lease, sender, sweep)
+    else:
+        sweep = 0
     pays = incoming(addr)
     pay_txs = sorted({p[0] for p in pays if p[0] not in lease.get("settledPayments", [])})
     receipt = {"lease": lease["id"], "month": month, "amount": c["amount"], "received": held // 10**18, "paymentTxs": pay_txs,
