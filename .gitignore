@@ -13,3 +13,4 @@ contracts/broadcast/
 tmp/
 *.log
 *.bak-*
+worker/assets.js

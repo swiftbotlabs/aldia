@@ -463,9 +463,10 @@ async function viewPay(id) {
   }
   const c = pub.current;
   const status = h("div", {});
-  const open = c && c.status !== "pagado";
+  const open = c && c.status !== "pagado" && c.amount && !pub.closed;
   const owed = c ? c.amount - (c.received || 0) : 0;
   shell(testBanner(pub),
+    pub.closed ? h("div", { class: "note warn" }, "Este alquiler ya no se cobra por Al Día. Consultá con tu propietario antes de pagar.") : null,
     h("h1", {}, c ? `Alquiler de ${monthName(c.month, false)}` : "Alquiler"),
     h("p", { class: "muted" }, pub.propertyLabel),
     c ? h("section", { class: "card" },
@@ -492,6 +493,48 @@ async function viewPay(id) {
 }
 
 /* ---------- Landlord ---------- */
+// Actions only the landlord's own wallet can take on the lease contract. Nothing here passes through our servers.
+async function landlordTx(pub, terms, data, status, okText) {
+  const eth = window.ethereum;
+  try {
+    const [from] = await eth.request({ method: "eth_requestAccounts" });
+    if (from.toLowerCase() !== terms.payout.toLowerCase()) {
+      status.replaceChildren(h("div", { class: "note warn" }, `Conectá la billetera ${short(terms.payout)}: es la única que puede hacer esto.`));
+      return;
+    }
+    try {
+      await eth.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0xa4ec" }] });
+    } catch { /* MiniPay is already on Celo */ }
+    const hash = await eth.request({ method: "eth_sendTransaction", params: [{ from, to: pub.collector, data: data + TAG_SUFFIX }] });
+    status.replaceChildren(h("div", { class: "note" }, okText, " ", h("a", { href: TX_URL(hash), rel: "noopener" }, "Ver operación")));
+  } catch {
+    status.replaceChildren(h("div", { class: "note warn" }, "No se pudo enviar. Probá de nuevo."));
+  }
+}
+function controls(pub, t) {
+  if (!pub || !pub.deployed) return null;
+  if (!window.ethereum) {
+    return h("section", { class: "card" }, h("h3", {}, "Tu cuenta, tus reglas"),
+      h("p", { class: "small muted" }, `Abrí este link desde la billetera ${short(t.payout)} para cambiar qué parte pasa a dólares, retirar lo que haya en la cuenta o sacar al agente.`));
+  }
+  const status = h("div", {});
+  let bps = pub.sweepBps;
+  const label = h("div", { class: "split" }, h("span", {}, `${100 - bps / 100} % pesos`), h("span", {}, `${bps / 100} % dólares`));
+  const uint = (n) => BigInt(n).toString(16).padStart(64, "0");
+  return h("section", { class: "card" }, h("h3", {}, "Tu cuenta, tus reglas"),
+    h("p", { class: "small muted" }, "Estas acciones las firmás vos con tu billetera. El agente no las puede hacer ni deshacer."),
+    h("input", { type: "range", min: 0, max: 10000, step: 500, value: bps, "aria-label": "Parte en dólares", oninput: (e) => {
+      bps = +e.target.value;
+      label.replaceChildren(h("span", {}, `${100 - bps / 100} % pesos`), h("span", {}, `${bps / 100} % dólares`));
+    } }),
+    label,
+    h("button", { class: "btn ghost block", type: "button", style: "margin-top:8px", onclick: () => landlordTx(pub, t, "0xd2d988d3" + uint(bps), status, "Listo: vale desde el próximo cobro.") }, "Guardar cómo cobro"),
+    h("button", { class: "btn ghost block", type: "button", style: "margin-top:8px", onclick: () => landlordTx(pub, t, "0x51cff8d9" + WARS.slice(2).toLowerCase().padStart(64, "0"), status, "Listo: los pesos de la cuenta van a tu billetera.") }, "Retirar los pesos de la cuenta"),
+    h("button", { class: "btn ghost block", type: "button", style: "margin-top:8px", onclick: () => {
+      if (window.confirm("Si sacás al agente, deja de cobrar y repartir este alquiler para siempre. ¿Seguro?")) landlordTx(pub, t, "0x683e2f4f", status, "Listo: el agente ya no opera esta cuenta.");
+    } }, "Sacar al agente de esta cuenta"),
+    status);
+}
 async function viewPanel(id) {
   document.title = "Tu contrato · Al Día";
   const m = location.hash.match(/k=([0-9a-f]{32})/);
@@ -539,6 +582,7 @@ async function viewPanel(id) {
   shell(pub ? testBanner(pub) : null,
     h("h1", {}, t.propertyLabel),
     !pub ? h("div", { class: "note" }, "Estamos preparando la cuenta de este contrato. Tarda menos de dos minutos.") : null,
+    pub && pub.closed ? h("div", { class: "note warn" }, "Sacaste al agente de esta cuenta. Lo que entre queda ahí hasta que lo retires con tu billetera.") : null,
     h("div", { class: "note warn noprint" }, "Guardá este link: es tu acceso privado. ", h("span", { class: "mono" }, privateUrl)),
     c ? h("section", { class: "card" },
       h("div", { class: "muted small" }, `Alquiler de ${monthName(c.month)}`),
@@ -568,6 +612,7 @@ async function viewPanel(id) {
         h("dt", {}, "Vence"), h("dd", {}, `Día ${t.dueDay}`)),
       h("p", { class: "small muted", style: "margin-top:10px" }, "¿Querés pasar pesos a tu banco? ",
         h("a", { href: `https://ramp.ripio.com/off-ramp?country=AR&chain=42220&token=WARS&amount=${c ? c.amount : 10000}`, rel: "noopener" }, "Hacelo con Ripio"), ".")),
+    controls(pub, t),
     pub && pub.history && pub.history.length ? h("section", { class: "card" },
       h("h3", {}, "Historial"),
       h("table", {}, h("tr", {}, h("th", {}, "Mes"), h("th", { class: "r" }, "Monto"), h("th", { class: "r" }, "Estado")),

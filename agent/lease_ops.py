@@ -81,11 +81,17 @@ def refresh_charges(lease, indices, month=None):
     """Issues this month's charge, and keeps it honest if the index is not out yet."""
     month = month or ar_month()
     t = lease["terms"]
+    today = time.strftime("%Y-%m-%d", ar_now())
+    aged = False
+    for m, old in lease["charges"].items():              # a month that ended unpaid stays visible as late
+        if m < month and old["status"] == "pendiente" and today > old["dueDate"]:
+            old["status"] = "vencido"
+            aged = True
     if month < t["startDate"][:7]:
-        return False
+        return aged
     c = lease["charges"].get(month)
     if c and c["status"] == "pagado":
-        return False
+        return aged
     before = json.dumps(c, sort_keys=True)
     try:
         if not indices or not indices.get("ok"):
@@ -95,17 +101,16 @@ def refresh_charges(lease, indices, month=None):
         c = c or {"month": month, "amount": None, "received": 0, "dueDate": due_date(lease, month)}
         c.update(status="sin-indice", waitingFor=str(e))
         lease["charges"][month] = c
-        return before != json.dumps(c, sort_keys=True)
+        return aged or before != json.dumps(c, sort_keys=True)
     c = c or {"month": month, "received": 0, "dueDate": due_date(lease, month)}
     c.update(amount=d["amount"], detail=d)
     c.pop("waitingFor", None)
-    today = time.strftime("%Y-%m-%d", ar_now())
     if c.get("received", 0) > 0:
         c["status"] = "parcial"
     else:
         c["status"] = "vencido" if today > c["dueDate"] else "pendiente"
     lease["charges"][month] = c
-    return before != json.dumps(c, sort_keys=True)
+    return aged or before != json.dumps(c, sort_keys=True)
 
 
 def incoming(collector):
@@ -240,7 +245,8 @@ def public_view(lease):
     if month >= t["startDate"][:7] and t["index"] in ("IPC", "ICL", "FIJO"):
         next_adj = rent.next_adjustment(t, month)
     view = {"id": lease["id"], "propertyLabel": t["propertyLabel"], "collector": lease["collector"], "deployed": lease["deployed"],
-            "builderTest": lease["builderTest"], "index": t["index"], "periodMonths": t["periodMonths"], "sweepBps": t["sweepBps"],
+            "builderTest": lease["builderTest"], "index": t["index"], "periodMonths": t["periodMonths"], "sweepBps": lease.get("sweepNow", t["sweepBps"]),
+            "closed": bool(lease.get("closed")),
             "feeBps": FEE_BPS, "nextAdjustment": next_adj, "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "current": None, "history": []}
     if cur:
@@ -275,3 +281,16 @@ def status_text(lease):
         return f"{label}: todavía no hay monto para {month_name(month)}."
     st = {"pagado": "ya está pagado", "pendiente": f"vence el {int(c['dueDate'][8:])}", "vencido": "está vencido", "parcial": "tiene un pago parcial"}.get(c["status"], c["status"])
     return f"{label}: el alquiler de {month_name(month)} es {ars(c['amount'])} y {st}."
+
+
+def sync_chain_terms(lease):
+    """The landlord can change the dollar share or remove the agent from their own wallet. The contract is the truth."""
+    if not lease["deployed"]:
+        return False
+    sweep = read_uint(lease["collector"], "sweepBps()")
+    agent = read_uint(lease["collector"], "agent()")
+    changed = sweep != lease.get("sweepNow", lease["terms"]["sweepBps"]) or (agent == 0 and not lease.get("closed"))
+    lease["sweepNow"] = sweep
+    if agent == 0:
+        lease["closed"] = True
+    return changed

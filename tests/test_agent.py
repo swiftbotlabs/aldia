@@ -3,6 +3,7 @@ import json, os, sys, unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "agent"))
 import indices, rent, reader
+import lease_ops as ops
 
 V = json.load(open(os.path.join(HERE, "vectors.json")))
 
@@ -36,6 +37,24 @@ class Rent(unittest.TestCase):
         L = {"baseRent": 1000, "startDate": "2026-02-01", "periodMonths": 3, "index": "FIJO", "fixedPct": 10}
         with self.assertRaises(ValueError):
             rent.rent_for_month(L, "2026-01", V["indices"])
+
+
+class Charges(unittest.TestCase):
+    def lease(self):
+        return {"terms": {"baseRent": 1000, "startDate": "2026-01-01", "periodMonths": 3, "index": "FIJO", "fixedPct": 10, "lagMonths": 2,
+                          "dueDay": 10, "propertyLabel": "x", "sweepBps": 0}, "charges": {}}
+
+    def test_a_month_that_ended_unpaid_turns_late(self):
+        l = self.lease()
+        l["charges"]["2020-01"] = {"month": "2020-01", "status": "pendiente", "dueDate": "2020-01-10", "amount": 1000, "received": 0}
+        self.assertTrue(ops.refresh_charges(l, {"ok": True, "ipc": {}, "icl": {}}, month="2030-01"))
+        self.assertEqual(l["charges"]["2020-01"]["status"], "vencido")
+
+    def test_no_new_amount_when_sources_disagree(self):
+        l = self.lease()
+        ops.refresh_charges(l, {"ok": False, "ipc": {}, "icl": {}}, month="2026-11")
+        self.assertEqual(l["charges"]["2026-11"]["status"], "sin-indice")
+        self.assertIsNone(l["charges"]["2026-11"]["amount"])
 
 
 class Indices(unittest.TestCase):

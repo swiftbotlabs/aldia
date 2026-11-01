@@ -142,6 +142,10 @@ class Agent:
             n.tell(lease, ["landlord"], f"partial:{month}:{c.get('received')}", f"Entró un pago parcial de {label}: {ops.ars(c.get('received') or 0)} de {amount}.")
 
     def watch(self, lease):
+        if time.time() - lease.get("syncedAt", 0) > 600:
+            lease["syncedAt"] = time.time()
+            if ops.sync_chain_terms(lease):
+                self.changed.add(lease["id"])
         if lease.get("closed"):
             return
         if ops.refresh_charges(lease, self.indices):

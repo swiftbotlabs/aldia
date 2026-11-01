@@ -1,0 +1,37 @@
+{
+  "out": "aldia-demo.mp4",
+  "title": "Al Día",
+  "subtitle": "Rent that updates and collects itself, in pesos",
+  "kicker": "Agents on Open Rails · Celo mainnet",
+  "end_title": "Al Día",
+  "end_lines": [
+    "aldia.swiftbotlab.workers.dev",
+    "github.com/swiftbotlab/aldia",
+    "ERC-8004 agent 10014 · tag celo_2ee02704a56d",
+    "No independent users yet: every payment shown is our own test"
+  ],
+  "brand": "Swift Bot Labs",
+  "accent": "#0E8A66",
+  "background": "#0B2A23",
+  "background2": "#12262B",
+  "caption_size": 36,
+  "segments": [
+    {"section": "1/5  The chore", "seconds": 2.2, "subtitle": "Small landlords in Argentina adjust the rent by hand"},
+    {"image": "shots/01_home.png", "seconds": 6, "pan": false, "caption": "Find the index, do the sum, message the tenant, watch the bank app, write the receipt, buy dollars. Every month."},
+    {"image": "shots/02_calc.png", "seconds": 7, "pan": false, "caption": "The calculator is free and needs no wallet. IPC comes from INDEC and ICL from the BCRA, cross-checked: if the sources disagree, the agent issues nothing."},
+    {"section": "2/5  The landlord loads a contract", "seconds": 2.2},
+    {"image": "shots/03_upload.png", "seconds": 5, "pan": false, "caption": "The PDF is read on the phone. DNI, CUIT, CBU, mail and phone are removed before any text leaves it."},
+    {"image": "shots/04_prefilled.png", "seconds": 6, "pan": false, "caption": "A paid model call over x402, through buy, finds the amount, dates and index. The landlord confirms each field."},
+    {"image": "shots/05_payout.png", "seconds": 6, "pan": false, "caption": "The landlord chooses how much stays in pesos and how much becomes dollars. The fee is 0.3%."},
+    {"image": "shots/06_panel.png", "seconds": 6, "pan": false, "caption": "One link for the tenant, by WhatsApp. Notices go out by Telegram. This lease is one of our own tests, and the page says so."},
+    {"section": "3/5  The tenant pays", "seconds": 2.2},
+    {"image": "shots/07_tenant.png", "seconds": 8, "pan": false, "caption": "The tenant sees the amount, why, and the official source. Another paid call audited this increase against the contract's clause."},
+    {"image": "shots/07_tenant.png", "seconds": 6, "pan": false, "caption": "Paying opens Ripio: a normal transfer that arrives as wARS at this lease's own address. In this demo we paid wARS ourselves."},
+    {"section": "4/5  The agent settles on mainnet", "seconds": 2.2},
+    {"image": "shots/10_tx.png", "seconds": 8, "pan": false, "caption": "Firm Textile quote with the lease contract as taker, compared with Uniswap, settled in one tagged transaction. It can pay only the landlord."},
+    {"image": "shots/08_receipt.png", "seconds": 7, "pan": false, "caption": "The receipt shows the rate, the fee and both transactions, plus a hash that matches the onchain event."},
+    {"section": "5/5  What is real", "seconds": 2.2},
+    {"image": "shots/09_transparency.png", "seconds": 7, "pan": false, "caption": "Zero independent users so far. All volume is our own tests, and the site separates the two."},
+    {"image": "shots/11_tiers.png", "seconds": 7, "pan": false, "caption": "Second entry, Textile FX: a Stitch fork that prices the taker. Four wallets are 99.5% of wARS fills, and makers lost 2.7 bp to them."}
+  ]
+}

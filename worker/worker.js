@@ -251,7 +251,7 @@ async function api(req, env, path) {
 function asset(path) {
   const a = ASSETS[path];
   if (!a) return null;
-  const headers = { "content-type": a.type, "cache-control": "public, max-age=300", ...SECURITY };
+  const headers = { "content-type": a.type, "cache-control": "public, max-age=60", ...SECURITY };
   const body = a.b64 ? Uint8Array.from(atob(a.b64), (c) => c.charCodeAt(0)) : a.text;
   return new Response(body, { headers });
 }
