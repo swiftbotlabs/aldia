@@ -4,10 +4,21 @@
   "description": "Rent that updates and collects itself, in pesos. Al Día reads the official index (IPC or ICL) for a rental contract, issues each month's charge in pesos, reconciles the tenant's payment in wARS on Celo, moves the landlord's chosen share into dollars under an onchain price floor, and issues the receipt. Built by Swift Bot Labs.",
   "image": "https://raw.githubusercontent.com/swiftbotlab/aldia/main/docs/logo.png",
   "services": [
-    { "name": "web", "endpoint": "https://aldia.swiftbotlab.workers.dev", "version": "1.0.0" }
+    {
+      "name": "web",
+      "endpoint": "https://aldia.swiftbotlab.workers.dev",
+      "version": "1.0.0"
+    }
   ],
   "x402Support": false,
   "active": true,
-  "supportedTrust": ["onchain-settlement"],
-  "registrations": []
+  "supportedTrust": [
+    "onchain-settlement"
+  ],
+  "registrations": [
+    {
+      "agentId": 10014,
+      "agentRegistry": "eip155:42220:0x8004A169FB4a3325136EB29fA0ceB6D2e539a432"
+    }
+  ]
 }
