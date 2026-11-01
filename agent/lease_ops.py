@@ -13,7 +13,10 @@ import celo
 import market
 import rent
 
-FACTORY = "0x4690e265fd2d542e1b44ac7ba41f796a474b11c1"
+FACTORY_V1 = "0x4690e265fd2d542e1b44ac7ba41f796a474b11c1"     # the first builder tests
+FACTORY = "0x1e7cbf5d31c85b168048115d0ae762463a475882"        # two-window floor
+AGENT_WALLET = "0xed120aec2240a25125b3f32eb8bff9c5f688121b"
+MAX_VENUE_GAP_BPS = 100
 TOPIC_SETTLED = "0x" + keccak(text="RentSettled(uint64,uint256,uint256,uint256,uint256,uint8,bytes32)").hex()
 FEE_BPS = 30
 MAX_SLIPPAGE_BPS = 100
@@ -45,6 +48,8 @@ def valid_terms(raw):
     assert t["periodMonths"] in (1, 2, 3, 4, 6, 12)
     assert t["lagMonths"] in (1, 2)
     assert isinstance(t["sweepBps"], int) and 0 <= t["sweepBps"] <= 10000
+    assert int(t["payout"], 16) > 0xFFFF, "payout is a reserved address"
+    assert t["payout"].lower() != AGENT_WALLET, "payout cannot be the agent wallet"
     t["payout"] = to_checksum_address(t["payout"])
     return t
 
@@ -64,10 +69,11 @@ ARGS = ["address", "uint16", "uint16", "uint16", "bytes32", "bytes32"]
 
 def open_lease(raw):
     t = valid_terms(raw)
+    ref = raw.get("contractRef")
     lease = {"id": raw["id"], "terms": t, "createdAt": raw["createdAt"], "termsHash": terms_hash(t).hex(),
              "salt": keccak(text="aldia:" + raw["id"]).hex(), "deployed": False, "charges": {}, "payments": [],
              "builderTest": t["payout"].lower() in OUR_WALLETS, "keyPrefix": raw.get("keyHash", "")[:20],
-             "contractRef": raw.get("contractRef")}
+             "contractRef": ref if isinstance(ref, str) and re.fullmatch(r"[0-9a-f]{16}", ref) else None, "factory": FACTORY}
     data = celo.sel("predict(address,uint16,uint16,uint16,bytes32,bytes32)") + encode(ARGS, _lease_args(lease))
     lease["collector"] = to_checksum_address("0x" + celo.eth_call(FACTORY, data)[-20:].hex())
     return lease
@@ -131,7 +137,7 @@ def ensure_deployed(lease, sender):
         return
     if celo.rpc("eth_getCode", [lease["collector"], "latest"]) in ("0x", "0x0"):
         data = celo.sel("createLease(address,uint16,uint16,uint16,bytes32,bytes32)") + encode(ARGS, _lease_args(lease))
-        h, rc = sender.send(FACTORY, data, note=f"open lease {lease['id']}")
+        h, rc = sender.send(lease.get("factory", FACTORY_V1), data, note=f"open lease {lease['id']}")
         if not rc or rc["status"] != "0x1":
             raise RuntimeError(f"lease deployment failed: {h}")
         lease["deployTx"] = h
@@ -165,6 +171,10 @@ def plan_route(lease, sender, sweep):
         pass
     tex_prev = market.textile_preview(market.WARS, market.USDT, sweep)
     note = {"floor": floor, "uniswap": uni, "textilePreview": tex_prev}
+    if uni and tex_prev and abs(uni - tex_prev) * 10000 > MAX_VENUE_GAP_BPS * max(uni, tex_prev):
+        # The two venues disagree by more than 1%: one of them is wrong or being pushed. Pay pesos this month.
+        note["skipped"] = "venues disagree"
+        return "none", 0, b"", note
     force = lease["builderTest"] and lease["id"] in force_textile()
     if tex_prev and tex_prev >= floor and (tex_prev >= uni or force):
         firm = market.textile_firm(c, sender.acct, market.WARS, market.USDT, sweep)
@@ -200,8 +210,10 @@ def settle(lease, month, sender):
     receipt = {"lease": lease["id"], "month": month, "amount": c["amount"], "received": held // 10**18, "paymentTxs": pay_txs,
                "detail": c.get("detail"), "termsHash": lease["termsHash"]}
     r_hash = keccak(json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode())
-    seq = len([p for p in lease.get("settlements", [])]) + 1
+    seq = len(lease.get("settlements", [])) + 1
     sid = int(month.replace("-", "")) * 100 + seq
+    while read_uint(addr, "settled(uint64)", sid.to_bytes(32, "big")):      # never reuse an id, even after losing local state
+        sid += 1
     args = encode(["uint64", "uint256", "uint8", "uint256", "bytes", "bytes32"], [sid, held, ROUTE[route], min_out, call, r_hash])
     data = celo.sel("settle(uint64,uint256,uint8,uint256,bytes,bytes32)") + args
     try:

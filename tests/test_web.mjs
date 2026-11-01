@@ -45,6 +45,11 @@ for (const [field, value] of [["baseRent", 999], ["baseRent", 1.5], ["startDate"
 }
 assert.strictEqual(validateLease({ ...good, propertyLabel: "a‮b\u0000c" }).lease.propertyLabel, "a b c");
 
+assert.strictEqual(validateLease({ ...good, contractRef: ["0123456789abcdef"] }).lease.contractRef, null, "an array must not pass as a reference");
+assert.strictEqual(validateLease({ ...good, contractRef: "0123456789abcdef" }).lease.contractRef, "0123456789abcdef");
+assert.ok(validateLease({ ...good, payout: "0x" + "0".repeat(39) + "1" }).errors.payout, "reserved low addresses are refused");
+assert.ok(validateLease({ ...good, payout: "0xED120aeC2240A25125B3f32Eb8Bff9C5F688121b" }).errors.payout, "the agent wallet cannot be a landlord");
+
 const created = await post("/api/leases", good);
 assert.strictEqual(created.status, 201);
 const { id, token } = await created.json();
@@ -64,6 +69,10 @@ assert.strictEqual(q.leases.length, 1);
 const badPub = await post("/agent/publish", { items: [{ key: "lease:" + id, value: {} }] }, { authorization: `Bearer ${env.AGENT_TOKEN}` });
 assert.strictEqual(badPub.status, 400, "the agent API cannot overwrite lease records");
 
+const pubKey = { authorization: `Bearer ${env.AGENT_TOKEN}` };
+assert.strictEqual((await post("/agent/publish", { items: [{ key: `pub:${id}`, value: { collector: "0xaaa" } }] }, pubKey)).status, 200);
+assert.strictEqual((await post("/agent/publish", { items: [{ key: `pub:${id}`, value: { collector: "0xbbb" } }] }, pubKey)).status, 409, "a collection address is locked once published");
+assert.strictEqual((await post("/api/leases", good, { origin: "https://evil.example" })).status, 403);
 assert.strictEqual((await post("/api/leer", { text: "corto" })).status, 422);
 assert.strictEqual((await post("/api/leer", { text: "x".repeat(30001) })).status, 422);
 assert.strictEqual((await call("/api/leases", { method: "POST", body: "{", headers: { "content-type": "application/json" } })).status, 400);

@@ -42,6 +42,35 @@ contract MockReactor {
     receive() external payable {}
 }
 
+/// A pool with scripted average ticks, to test how the two windows combine.
+contract MockPool {
+    address public immutable token0;
+    int24 public shortTick;
+    int24 public longTick;
+    bool public historyTooShort;
+    uint32 immutable shortWindow;
+
+    constructor(address t0, uint32 w) {
+        token0 = t0;
+        shortWindow = w;
+    }
+
+    function set(int24 s, int24 l, bool tooShort) external {
+        shortTick = s;
+        longTick = l;
+        historyTooShort = tooShort;
+    }
+
+    function observe(uint32[] calldata ago) external view returns (int56[] memory cum, uint160[] memory liq) {
+        cum = new int56[](2);
+        liq = new uint160[](2);
+        if (ago[0] != shortWindow && historyTooShort) revert("OLD");
+        int24 t = ago[0] == shortWindow ? shortTick : longTick;
+        cum[0] = 0;
+        cum[1] = int56(t) * int56(uint56(ago[0]));
+    }
+}
+
 /// Runs on a Celo mainnet fork: real wARS, real USD₮, the real Uniswap pool and router.
 ///   forge test --fork-url https://forno.celo.org
 contract AlDiaForkTest is Test {
@@ -51,6 +80,7 @@ contract AlDiaForkTest is Test {
     ISwapRouter02Like constant ROUTER = ISwapRouter02Like(0x5615CDAb10dc425a742d643d949a7F474C01abc4);
     uint24 constant FEE = 100;
     uint32 constant WINDOW = 1800;
+    uint32 constant LONG_WINDOW = 14400;
 
     address landlord = makeAddr("landlord");
     address tenant = makeAddr("tenant");
@@ -66,7 +96,7 @@ contract AlDiaForkTest is Test {
         vm.createSelectFork(vm.envOr("CELO_RPC", string("https://forno.celo.org")));
         agent = vm.addr(agentKey);
         reactor = new MockReactor(WARS, USDT);
-        factory = new AlDiaFactory(agent, WARS, USDT, POOL, FEE, WINDOW, address(reactor), ROUTER, treasury);
+        factory = new AlDiaFactory(agent, WARS, USDT, POOL, FEE, WINDOW, LONG_WINDOW, address(reactor), ROUTER, treasury);
         lease = _open(5000, 30, 100, bytes32(uint256(1)));
         vm.prank(address(POOL));
         WARS.transfer(tenant, 1_000_000e18);
@@ -125,6 +155,25 @@ contract AlDiaForkTest is Test {
         assertGt(usd, 300); // about $600 of pesos on 2026-11-01; generous bounds so a devaluation doesn't break it
         assertLt(usd, 1500);
         assertEq(lease.quoteFloor(oneMillion), (twap * 9900) / 10000);
+    }
+
+    function test_floorIsTheHigherOfTheTwoWindows() public {
+        MockPool mock = new MockPool(address(WARS), WINDOW);
+        AlDiaFactory f = new AlDiaFactory(agent, WARS, USDT, IUniswapV3PoolLike(address(mock)), FEE, WINDOW, LONG_WINDOW, address(reactor), ROUTER, treasury);
+        AlDiaLease l = AlDiaLease(payable(f.createLease(landlord, 5000, 30, 100, keccak256("terms"), bytes32(uint256(9)))));
+        uint256 amount = 1_000_000e18;
+        // Someone drags the short window down 1% (about 100 ticks). The long window holds the floor up.
+        mock.set(-350500, -350400, false);
+        uint256 dragged = l.quoteAtTwap(amount);
+        mock.set(-350400, -350400, false);
+        uint256 fair = l.quoteAtTwap(amount);
+        assertEq(dragged, fair);
+        // Positive control: a higher short window wins too, so the check is a real max.
+        mock.set(-350300, -350400, false);
+        assertGt(l.quoteAtTwap(amount), fair);
+        // A pool without long history falls back to the short window instead of blocking every settlement.
+        mock.set(-350500, -350400, true);
+        assertLt(l.quoteAtTwap(amount), fair);
     }
 
     function test_settleThroughUniswapPaysLandlordOnly() public {

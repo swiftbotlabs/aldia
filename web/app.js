@@ -95,6 +95,12 @@ function viewHome() {
       h("p", { class: "muted" }, "0,3 % de cada alquiler cobrado. Se descuenta solo y lo ves en cada recibo. Calcular aumentos con la calculadora es gratis."),
       h("h3", {}, "¿Puedo usarlo con mi contrato actual?"),
       h("p", { class: "muted" }, "Sí, si las dos partes están de acuerdo. Al Día no cambia el contrato: aplica lo que dice. Revisá que el índice y los meses que usamos coincidan con tu cláusula."),
+      h("h3", {}, "¿Qué pasa si el dólar se mueve fuerte?"),
+      h("p", { class: "muted" }, "Cada conversión tiene un piso de precio que calcula el propio contrato. Si el mercado está por debajo, el agente no convierte y ese mes cobrás todo en pesos."),
+      h("h3", {}, "¿Y si el pago entra incompleto?"),
+      h("p", { class: "muted" }, "Queda en la cuenta del contrato y lo ves como pago parcial. El agente reparte cuando entra el resto, y vos podés retirarlo antes con tu billetera."),
+      h("h3", {}, "¿Reemplaza la factura?"),
+      h("p", { class: "muted" }, "No. El recibo de Al Día es un comprobante informativo. Lo que tengas que facturar o declarar lo seguís haciendo como siempre."),
       h("h3", {}, "¿Ya lo usa gente?"),
       h("p", { class: "muted" }, "Estamos arrancando. En ", h("a", { href: "/transparencia", "data-link": 1 }, "Transparencia"), " publicamos cuántos contratos y pagos son reales y cuáles son pruebas nuestras."))
   );
@@ -494,6 +500,16 @@ async function viewPay(id) {
 
 /* ---------- Landlord ---------- */
 // Actions only the landlord's own wallet can take on the lease contract. Nothing here passes through our servers.
+// A plain projection for planning: the last three IPC prints repeated. Clearly labelled as an estimate.
+function nextEstimate(c, t, idx) {
+  if (!c || !c.amount) return "";
+  if (t.index === "FIJO") return `Va a ser de ${ars(Math.floor(c.amount * (1 + t.fixedPct / 100) + 0.5))}.`;
+  if (t.index !== "IPC" || !idx) return "";
+  const months = Object.keys(idx.ipcMonthlyPct).sort().slice(-3);
+  const avg = months.reduce((a, m) => a + idx.ipcMonthlyPct[m], 0) / months.length;
+  const projected = c.amount * Math.pow(1 + avg / 100, t.periodMonths);
+  return `Si la inflación sigue como en los últimos tres meses, sería de unos ${ars(Math.round(projected / 1000) * 1000)}.`;
+}
 async function landlordTx(pub, terms, data, status, okText) {
   const eth = window.ethereum;
   try {
@@ -562,6 +578,7 @@ async function viewPanel(id) {
   const t = d.terms;
   const pub = d.pub;
   const c = pub && pub.current;
+  const idx = await indices().catch(() => null);
   const tenantUrl = `${location.origin}/pagar/${id}`;
   const privateUrl = `${location.origin}/panel/${id}#k=${token}`;
   const greet = t.tenantLabel ? `Hola ${t.tenantLabel}!` : "Hola!";
@@ -591,7 +608,7 @@ async function viewPanel(id) {
       c.received ? h("p", { class: "small" }, `Recibido: ${ars(c.received)}.`) : null,
       h("details", {}, h("summary", {}, "Cómo se calculó"), explainRent(c.detail, t)),
       clauseNote(c),
-      pub.nextAdjustment ? h("p", { class: "small muted", style: "margin:10px 0 0" }, `Próximo aumento: ${monthName(pub.nextAdjustment)}.`) : null) : null,
+      pub.nextAdjustment ? h("p", { class: "small muted", style: "margin:10px 0 0" }, `Próximo aumento: ${monthName(pub.nextAdjustment)}.`, " ", nextEstimate(c, t, idx)) : null) : null,
     h("section", { class: "card" },
       h("h3", {}, "Mandale el link a tu inquilino"),
       h("p", { class: "small muted" }, "Es siempre el mismo. Cada mes muestra el monto que corresponde."),
@@ -691,7 +708,7 @@ async function viewTransparency() {
       h("dl", { class: "kv" },
         h("dt", {}, "Agente"), h("dd", {}, h("a", { href: "https://8004scan.io/agents/celo/10014", rel: "noopener" }, "ERC-8004 n.º 10014")),
         h("dt", {}, "Billetera del agente"), h("dd", {}, h("a", { href: LEASE_URL("0xED120aeC2240A25125B3f32Eb8Bff9C5F688121b"), rel: "noopener", class: "mono" }, "0xED12…121b")),
-        h("dt", {}, "Fábrica de cuentas"), h("dd", {}, h("a", { href: LEASE_URL("0x4690e265fd2d542e1b44ac7ba41f796a474b11c1"), rel: "noopener", class: "mono" }, "0x4690…11c1"))),
+        h("dt", {}, "Fábrica de cuentas"), h("dd", {}, h("a", { href: LEASE_URL("0x1e7cbf5d31c85b168048115d0ae762463a475882"), rel: "noopener", class: "mono" }, "0x1e7c…5882"))),
       s.leases && s.leases.length ? h("table", { style: "margin-top:10px" }, s.leases.map((l) => h("tr", {}, h("td", {}, l.label), h("td", { class: "r" }, l.kind)))) : null),
     s.paidCalls ? h("section", { class: "card" },
       h("h3", {}, "Servicios que pagamos"),

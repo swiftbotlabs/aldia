@@ -6,6 +6,7 @@ import urllib.error
 import urllib.request
 
 from eth_abi import decode, encode
+from eth_utils import keccak
 
 import celo
 
@@ -46,13 +47,23 @@ def textile_preview(sell_token, buy_token, sell_amount):
     return int(data["buyAmount"])
 
 
+def taker_control_digest(lease, nonce, issued_at):
+    """EIP-712 digest of Textile's TakerControl message. Computed here, never taken from an RPC, so a lying node can never
+    get the agent to sign something else. The lease contract rebuilds the same digest in isValidSignature."""
+    domain = keccak(encode(["bytes32", "bytes32", "bytes32", "uint256"],
+                           [keccak(text="EIP712Domain(string name,string version,uint256 chainId)"),
+                            keccak(text="Textile Taker Control"), keccak(text="1"), celo.CHAIN_ID]))
+    struct = keccak(encode(["bytes32", "address", "uint256", "bytes32", "uint256"],
+                           [keccak(text="TakerControl(address taker,uint256 chainId,bytes32 nonce,uint256 issuedAt)"),
+                            lease, celo.CHAIN_ID, nonce, issued_at]))
+    return keccak(b"\x19\x01" + domain + struct)
+
+
 def taker_proof(lease, acct):
-    """Textile's proof of control for a contract taker: EIP-1271 over the digest the lease rebuilds itself."""
+    """Textile's proof of control for a contract taker: EIP-1271 over the digest above."""
     nonce = os.urandom(32)
     issued_at = int(time.time() * 1000)
-    data = celo.sel("takerControlDigest(bytes32,uint256)") + nonce + issued_at.to_bytes(32, "big")
-    digest = celo.eth_call(lease, data)[:32]
-    sig = acct.unsafe_sign_hash(digest)
+    sig = acct.unsafe_sign_hash(taker_control_digest(lease, nonce, issued_at))
     raw = sig.r.to_bytes(32, "big") + sig.s.to_bytes(32, "big") + bytes([sig.v])
     blob = nonce + issued_at.to_bytes(32, "big") + raw
     return {"nonce": "0x" + nonce.hex(), "issuedAt": issued_at, "signature": "0x" + blob.hex()}

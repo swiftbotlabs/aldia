@@ -21,13 +21,14 @@ contract AlDiaFactory {
         IUniswapV3PoolLike pool,
         uint24 poolFee,
         uint32 twapWindow,
+        uint32 twapWindowLong,
         address reactor,
         ISwapRouter02Like router,
         address feeRecipient
     ) {
         agent = agent_;
         implementation =
-            address(new AlDiaLease(peso, dollar, pool, poolFee, twapWindow, reactor, router, feeRecipient));
+            address(new AlDiaLease(peso, dollar, pool, poolFee, twapWindow, twapWindowLong, reactor, router, feeRecipient));
     }
 
     function createLease(

@@ -3,6 +3,7 @@
 import { ASSETS } from "./assets.js";
 
 const MAX_BODY = 40_000;
+const AGENT_WALLET = "0xed120aec2240a25125b3f32eb8bff9c5f688121b";
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const CSP = [
   "default-src 'self'",
@@ -113,10 +114,12 @@ export function validateLease(b, today = new Date()) {
   const sweepBps = Number(b.sweepBps);
   if (!Number.isInteger(sweepBps) || sweepBps < 0 || sweepBps > 10000 || sweepBps % 500 !== 0) errors.sweepBps = "Valor inválido.";
   const payout = String(b.payout || "");
-  if (!/^0x[0-9a-fA-F]{40}$/.test(payout) || /^0x0{40}$/.test(payout)) {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(payout) || /^0x0{36}/.test(payout)) {
     errors.payout = "Esa dirección no parece válida. Tiene que empezar con 0x y tener 42 caracteres.";
+  } else if (payout.toLowerCase() === AGENT_WALLET) {
+    errors.payout = "Esa es la dirección del agente de Al Día. Poné la de tu billetera.";
   }
-  const contractRef = /^[0-9a-f]{16}$/.test(String(b.contractRef || "")) ? b.contractRef : null;
+  const contractRef = typeof b.contractRef === "string" && /^[0-9a-f]{16}$/.test(b.contractRef) ? b.contractRef : null;
   if (Object.keys(errors).length) return { errors };
   return {
     lease: { propertyLabel, tenantLabel, baseRent, startDate, dueDay, index, periodMonths, lagMonths, fixedPct, sweepBps, payout, contractRef },
@@ -129,7 +132,7 @@ async function createLease(req, env) {
   const { lease, errors } = validateLease(body);
   if (errors) return json({ error: "invalid", fields: errors }, 422);
   if (await rateLimited(req, "lease", 6, 3600)) return fail(429, "slow_down", "Demasiados intentos. Probá en un rato.");
-  if (await dailyCap(env, "lease", 40)) return fail(429, "cap", "Llegamos al cupo de hoy. Probá mañana.");
+  if (await dailyCap(env, "lease", 150)) return fail(429, "cap", "Llegamos al cupo de hoy. Probá mañana.");
   const id = randomId(6);
   const token = randomId(16);
   const record = { ...lease, id, createdAt: new Date().toISOString(), keyHash: await sha256Hex(token) };
@@ -201,6 +204,11 @@ async function agentApi(req, env, path) {
     const b = JSON.parse(await req.text());
     for (const it of b.items || []) {
       if (typeof it.key !== "string" || !AGENT_KEYS.test(it.key)) return fail(400, "bad_key", it.key);
+      // A lease's collection address never changes once published, so this token can't redirect tenants' rent.
+      if (it.key.startsWith("pub:")) {
+        const old = await env.KV.get(it.key);
+        if (old && it.value && JSON.parse(old).collector !== it.value.collector) return fail(409, "collector_locked", it.key);
+      }
       await env.KV.put(it.key, JSON.stringify(it.value), it.ttl ? { expirationTtl: it.ttl } : undefined);
     }
     return json({ ok: true });
@@ -214,6 +222,11 @@ async function kvJson(env, key, fallback = null) {
 }
 
 async function api(req, env, path) {
+  if (req.method === "POST") {
+    // Writes come from our own pages. This is not authentication, but it stops other sites from spending the daily caps.
+    const origin = req.headers.get("origin");
+    if (origin && origin !== new URL(req.url).origin) return fail(403, "origin", "no");
+  }
   if (path === "/api/leases" && req.method === "POST") return createLease(req, env);
   if (path === "/api/leer" && req.method === "POST") return createRead(req, env);
   if (req.method !== "GET") return fail(405, "method", "no");

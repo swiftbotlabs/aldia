@@ -91,6 +91,9 @@ def paid_call(url, body, service, acct=None, timeout=120):
     else:
         payload = {"x402Version": 2, "accepted": accept, "payload": {"signature": sig, "authorization": auth}}
         header = {"PAYMENT-SIGNATURE": base64.b64encode(json.dumps(payload).encode()).decode()}
+    with open(LOG, "a") as f:     # written first: a call that times out after paying still counts against the ceiling
+        f.write(json.dumps({"t": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "service": service, "atomic": value,
+                            "status": None, "tx": None, "payTo": accept["payTo"]}) + "\n")
     code, headers, raw = _post(url, body, header, timeout=timeout)
     tx = None
     for k, v in headers.items():
@@ -100,7 +103,7 @@ def paid_call(url, body, service, acct=None, timeout=120):
             except Exception:
                 pass
     with open(LOG, "a") as f:
-        f.write(json.dumps({"t": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "service": service, "atomic": value,
+        f.write(json.dumps({"t": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "service": service, "atomic": 0, "paid": value,
                             "status": code, "tx": tx, "payTo": accept["payTo"]}) + "\n")
     if code >= 400:
         raise BuyError(f"paid call returned {code}: {raw[:200]!r}")

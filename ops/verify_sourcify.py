@@ -27,5 +27,5 @@ def post(address, name):
             print(name, "done", json.dumps(st.get("contract") or st.get("error"))[:300])
             return
     print(name, "still running")
-post("0x4690e265fd2d542e1b44ac7ba41f796a474b11c1", "AlDiaFactory")
-post("0xc6807392b5f33d3a17a4a61c5f3d2f9f0c0d975e", "AlDiaLease")
+post("0x1e7cbf5d31c85b168048115d0ae762463a475882", "AlDiaFactory")
+post("0x90c1f1e91c21f2f166317b6e8a9292b9df707759", "AlDiaLease")

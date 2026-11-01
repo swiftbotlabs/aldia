@@ -54,6 +54,7 @@ class Agent:
         self.last_health = 0
         self.last_stats = ""
         self.last_inflows = 0
+        self.last_recover = 0
         self.notifier = notify.Notifier()
         self.reads = json.load(open(READS)) if os.path.exists(READS) else {}
 
@@ -94,17 +95,40 @@ class Agent:
                 webapp.publish([{"key": f"readres:{r['rid']}", "value": {"status": "failed"}, "ttl": 3600}])
                 log("contract read failed", r["rid"], repr(e)[:160])
         if done or reads:
+            save(self.store)        # saved before the ack, so a crash can never lose a lease the queue has dropped
             webapp.ack(done, reads)
+
+    def recover(self):
+        """The queue is a read-then-write on eventually consistent storage, so a burst can drop an entry. Every lease also has
+        its own pending key: anything still pending that we do not know gets picked up here."""
+        if time.time() - self.last_recover < 1800:
+            return
+        self.last_recover = time.time()
+        for i in webapp.call("GET", "/agent/pending").get("ids", []):
+            if i in self.store:
+                webapp.ack([i], [])
+                continue
+            try:
+                self.store[i] = ops.open_lease(webapp.call("GET", f"/agent/lease?id={i}"))
+                self.changed.add(i)
+                log("lease recovered", i)
+                save(self.store)
+                webapp.ack([i], [])
+            except (AssertionError, KeyError, ValueError, TypeError) as e:
+                log("lease refused", i, repr(e)[:120])
+                webapp.ack([i], [])
 
     def check_clause(self, lease):
         """Each time a rent goes up and we hold the contract's clause, a paid model call checks the increase against it."""
         c = lease["charges"].get(ops.ar_month())
-        clause = self.reads.get(lease.get("contractRef") or "")
-        if not c or not clause or "clauseCheck" in c or c.get("status") == "pagado":
+        ref = lease.get("contractRef")
+        clause = self.reads.get(ref) if isinstance(ref, str) else None
+        if not c or not clause or c.get("clauseTried") or "clauseCheck" in c or c.get("status") == "pagado":
             return
         d = c.get("detail") or {}
         if not d.get("adjustments") or d.get("adjustmentMonth") != c["month"]:
             return
+        c["clauseTried"] = True       # one attempt per charge, paid or not: a bad answer never turns into a loop of payments
         try:
             c["clauseCheck"] = reader.check_clause(clause, d, lease["terms"]["periodMonths"], acct=self.sender.acct)
             log("clause check", lease["id"], c["clauseCheck"])
@@ -155,6 +179,7 @@ class Agent:
         held = celo.erc20_balance(market.WARS, lease["collector"])
         if held == 0:
             return
+        ops.ensure_deployed(lease, self.sender)     # money at a lease address must always have a contract to withdraw from
         open_months = sorted(m for m, c in lease["charges"].items() if c["status"] != "pagado" and c.get("amount"))
         if not open_months:
             log("funds without an open charge", lease["id"], held)
@@ -173,6 +198,7 @@ class Agent:
                 return
             done = ops.settle(lease, month, self.sender)
             self.changed.add(lease["id"])
+            save(self.store)                        # right away: this is the one thing that must never be forgotten
             if done:
                 webapp.publish([{"key": f"receipt:{lease['id']}:{month}", "value": done}])
                 log("settled", lease["id"], month, done["settleTx"], done["route"])
@@ -193,17 +219,21 @@ class Agent:
 
     def stats(self):
         leases = list(self.store.values())
-        real = [l for l in leases if not l["builderTest"]]
         pays = [p for l in leases for p in l["payments"]]
-        s = {"leasesThird": len(real), "leasesTest": len(leases) - len(real),
+        # A lease counts as a third party's only once a payment from a wallet that is not ours has settled. Nobody can inflate
+        # this by filling in a form, and strangers' labels are never published here.
+        third = [l for l in leases if any(not p["ours"] for p in l["payments"])]
+        tests = [l for l in leases if l["builderTest"]]
+        s = {"leasesThird": len(third), "leasesTest": len(tests),
              "paymentsThird": sum(1 for p in pays if not p["ours"]), "paymentsTest": sum(1 for p in pays if p["ours"]),
-             "leases": [{"label": l["terms"]["propertyLabel"], "kind": "prueba nuestra" if l["builderTest"] else "tercero"} for l in leases][-12:]}
+             "leases": [{"label": l["terms"]["propertyLabel"], "kind": "prueba nuestra"} for l in tests][-12:]}
         log_path = os.path.join(celo.STATE_DIR, "paidcalls.jsonl")
         if os.path.exists(log_path):
             calls = [json.loads(x) for x in open(log_path)]
-            ok = [c for c in calls if c["status"] < 400]
-            s["paidCalls"] = {"count": len(ok), "usd": sum(c["atomic"] for c in ok) / 1e6,
-                              "recent": [{"service": SERVICE_NAMES.get(c["service"], c["service"]), "usd": c["atomic"] / 1e6, "tx": c["tx"]} for c in ok[-8:]]}
+            ok = [c for c in calls if c["status"] is not None and c["status"] < 400]
+            cost = lambda c: c.get("paid", c["atomic"]) / 1e6
+            s["paidCalls"] = {"count": len(ok), "usd": round(sum(cost(c) for c in ok), 6),
+                              "recent": [{"service": SERVICE_NAMES.get(c["service"], c["service"]), "usd": cost(c), "tx": c["tx"]} for c in ok[-8:]]}
         blob = json.dumps(s, sort_keys=True)
         if blob != self.last_stats:
             self.last_stats = blob
@@ -213,9 +243,19 @@ class Agent:
     def tick(self):
         self.refresh_indices()
         self.pull()
+        self.recover()
         self.notifier.poll(self.store, ops.status_text)
         for lease in list(self.store.values()):
-            self.watch(lease)
+            if time.time() < lease.get("retryAt", 0):
+                continue
+            try:                                     # one bad lease never stops the others
+                self.watch(lease)
+                lease.pop("fails", None)
+            except Exception as e:
+                lease["fails"] = lease.get("fails", 0) + 1
+                lease["retryAt"] = time.time() + min(3600, 60 * 2 ** lease["fails"])
+                self.changed.add(lease["id"])
+                log("lease failed", lease["id"], lease["fails"], type(e).__name__, str(e)[:160])
         if self.changed:
             items = []
             for i in self.changed:

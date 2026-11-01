@@ -30,10 +30,10 @@ Al Día does the landlord's chore and shows the tenant the working. Graciela is 
 
 ## What the agent cannot do
 
-Each lease is its own contract, [`AlDiaLease`](contracts/src/AlDiaLease.sol). The rules hold even if the agent's key is stolen:
+Each lease is its own contract, [`AlDiaLease`](contracts/src/AlDiaLease.sol). These rules hold even if the agent's key is stolen. The price floor has one limit, explained in [SECURITY.md](SECURITY.md):
 
 - `settle` can pay only the landlord and a fee capped at 1%. There is no recipient parameter.
-- A swap must return at least the Uniswap 30-minute TWAP less the landlord's slippage limit. The contract computes that floor, not the agent.
+- A swap must return at least the higher of the Uniswap 30-minute and 4-hour TWAPs, less the landlord's slippage limit. The contract computes that floor, not the agent. If the market really falls fast, the floor stays above it for a while and the landlord gets pesos that month.
 - The dollar share belongs to the landlord. The agent can skip a swap, never raise the share.
 - The landlord can withdraw everything or remove the agent at any time.
 - The ERC-1271 signature check accepts one message only: Textile's taker-control text for that contract.
@@ -56,8 +56,11 @@ Each lease is its own contract, [`AlDiaLease`](contracts/src/AlDiaLease.sol). Th
 | First cycle | 4,000 wARS | Full cycle: 12 fee, 1,994 pesos, 1.21 USD₮ via Uniswap | [`0x438b…`](https://celoscan.io/tx/0x438b11f40a7303ac05a6710c2005ed07c2c431ea425fcfd5f1c1ab1d5932d4af) | [`0x9479…`](https://celoscan.io/tx/0x947955cd7b31aad7c2d64e1df1648c0ecb53c6046ed92c3bf0e2db300a0cd341) |
 | IPC rent | 2,102 wARS | 1,700 raised by official IPC (+23.64%), all to dollars | [`0xe6de…`](https://celoscan.io/tx/0xe6de665bcfcaf4af4ec24175a2f1f636f7779562087f48c5a5e08028d01137db) | [`0xf248…`](https://celoscan.io/tx/0xf24844e388a5955fc860d16d2d9ba8ab5d89da3d62cfc91dbc873e31e15dec80) |
 | ICL rent | 1,859 wARS | Textile route with the lease contract as taker | [`0xa363…`](https://celoscan.io/tx/0xa363761b8edde783e07770829a6758f105d63594ede8d42951966148a5bb56c6) | [`0x59a3…`](https://celoscan.io/tx/0x59a313d4c5e265d402189ea46cdd41e3ac362033da57fc00df88bfd62bded6e6) |
+| Current factory | 1,000 wARS | The two-window floor on mainnet: 3 fee, 498 pesos, 0.30 USD₮ via Uniswap | [`0x786a…`](https://celoscan.io/tx/0x786a56c5ad24247919cc1ec80c1f5064513dba80cb1b0192b9992c7c3af543a0) | [`0x502f…`](https://celoscan.io/tx/0x502f68f20c46b3c3ba3d013490dab9b4893a61713940157188d92c3ed704ac04) |
 
 In the third test we told the agent to take Textile even though Uniswap was a little better (1.124876 against 1.125160 USD₮), to prove the route. Without that instruction it takes the better price.
+
+The fourth rent went through Uniswap even though Textile previewed a little better, because its sweep was under Textile's $1 minimum. Across the four rents the agent paid 8,961 wARS of our own money through the system.
 
 The tenant path through Ripio's ramp link is built, but we have not completed it end to end: it needs an Argentine account and Ripio's KYC, which we do not have. Our tests pay wARS directly.
 
@@ -73,13 +76,13 @@ The tenant path through Ripio's ramp link is built, but we have not completed it
 | Stablecoin gas | CIP-64 is implemented and [tested once](https://celoscan.io/tx/0x8c67010e073adace6180efd6c3358d26a9f7637c12847ecc0479a6d806407957). It is switched off in normal running. |
 | MiniPay | The tenant page detects an injected wallet and pays wARS with one tap. Tested with a wallet stub, not yet inside MiniPay itself. |
 
-Contracts, both verified on Sourcify with an exact match: [AlDiaFactory](https://celoscan.io/address/0x4690e265fd2d542e1b44ac7ba41f796a474b11c1) `0x4690e265fD2d542e1B44aC7ba41f796a474b11c1`, [AlDiaLease implementation](https://celoscan.io/address/0xc6807392B5f33d3A17A4a61C5f3d2f9f0c0D975e) `0xc6807392B5f33d3A17A4a61C5f3d2f9f0c0D975e`. Agent wallet: `0xED120aeC2240A25125B3f32Eb8Bff9C5F688121b`.
+Contracts, verified on Sourcify with an exact match: [AlDiaFactory](https://celoscan.io/address/0x1e7CBf5d31c85B168048115d0aE762463A475882) `0x1e7CBf5d31c85B168048115d0aE762463A475882` and its [AlDiaLease implementation](https://celoscan.io/address/0x90C1F1e91C21f2f166317B6e8A9292B9dF707759) `0x90C1F1e91C21f2f166317B6e8A9292B9dF707759`. An earlier factory, `0x4690e265fD2d542e1B44aC7ba41f796a474b11c1`, had a one-window floor; a security review found that weak, so new leases use the two-window version. The first three test rents below ran on the old factory. Agent wallet: `0xED120aeC2240A25125B3f32Eb8Bff9C5F688121b`.
 
 ## Services we pay for
 
 | Service | Why | Proof |
 |---|---|---|
-| Cencori inference, through buy | Reads the contract; audits each increase against the clause | [read](https://celoscan.io/tx/0xc385e6e5b61188cbc527f317940a5e0ed13946e4dfcea811b4af8df2f22756f0), [audit](https://celoscan.io/tx/0x05ea6681bd88ec4521384dfb56f70fb5518e564f7af7e7f81b11c80b81849a77) |
+| Cencori inference, through buy | Reads the contract; audits each increase against the clause. Five calls so far, all from our own tests. | [read](https://celoscan.io/tx/0xc385e6e5b61188cbc527f317940a5e0ed13946e4dfcea811b4af8df2f22756f0), [audit](https://celoscan.io/tx/0x05ea6681bd88ec4521384dfb56f70fb5518e564f7af7e7f81b11c80b81849a77) |
 
 We also rented a browser through buy three times to compare a rent with live listings, and dropped that feature: the listing sites block it. Those calls are in the [transparency page](https://aldia.swiftbotlab.workers.dev/transparencia), labelled as tests.
 
@@ -103,7 +106,7 @@ The Worker holds no keys and moves no money. It stores what people type and show
 ## Run it
 
 ```bash
-./run_tests.sh          # agent, Worker, 540 shared rent vectors, then contracts on a Celo mainnet fork
+./run_tests.sh          # agent, Worker, 540 shared rent vectors, then 17 contract tests on a Celo mainnet fork
 ```
 
 The rent arithmetic exists twice, in Python for the agent and JavaScript for the page. Both are held to the same vectors in `tests/vectors.json`.
@@ -118,6 +121,8 @@ Everything here was written during the hackathon, from 1 November 2026, except f
 - wBRL and Brazil: the Uniswap pool holds almost no USD₮, so its TWAP floor cannot be trusted yet.
 - WhatsApp notices, which need a Meta business account. Today the landlord sends the link by WhatsApp and notices go by Telegram.
 - Partial payments stay in the lease until the rest arrives; the landlord can withdraw them at any time.
+- Limits on the public forms are soft against a determined attacker: they could use up a day's contract slots. No funds are at risk from that.
+- The agent key cannot be rotated on a deployed lease. If it were ever stolen, each landlord would remove the agent and a new factory would take over.
 
 Al Día is not an estate agent or a bank and does not replace a contract or legal or tax advice. See [SECURITY.md](SECURITY.md).
 

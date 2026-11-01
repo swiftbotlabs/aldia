@@ -34,7 +34,10 @@ interface ISwapRouter02Like {
 /// chose: pesos to the landlord, a share swapped to USD₮ and sent to the landlord, a small capped fee.
 /// @dev What the agent key can and cannot do, even if it is stolen:
 ///  - `settle` can only pay `landlord` and `feeRecipient`. There is no parameter for a recipient.
-///  - A swap must return at least the floor: the pool's TWAP less `maxSlippageBps`, both checked here, not by the agent.
+///  - A swap must return at least the floor: the higher of a short and a long TWAP of the pool, less `maxSlippageBps`, all
+///    computed here, not by the agent. Using the higher of the two means someone would have to hold the pool off-price for
+///    hours to drag the floor down. In a real sudden fall the floor stays above the market for a while and the landlord
+///    simply gets pesos that month.
 ///  - `sweepBps` belongs to the landlord. The agent can only skip the swap, never raise the share.
 ///  - The landlord can take every token out at any time and can remove the agent for good.
 ///  - Signature checks accept one message only: Textile's taker-control text for this contract, signed by the agent.
@@ -56,6 +59,7 @@ contract AlDiaLease {
     IUniswapV3PoolLike public immutable pool;
     uint24 public immutable poolFee;
     uint32 public immutable twapWindow;
+    uint32 public immutable twapWindowLong;
     address public immutable reactor;
     ISwapRouter02Like public immutable router;
     address public immutable feeRecipient;
@@ -119,6 +123,7 @@ contract AlDiaLease {
         IUniswapV3PoolLike pool_,
         uint24 poolFee_,
         uint32 twapWindow_,
+        uint32 twapWindowLong_,
         address reactor_,
         ISwapRouter02Like router_,
         address feeRecipient_
@@ -128,6 +133,7 @@ contract AlDiaLease {
         pool = pool_;
         poolFee = poolFee_;
         twapWindow = twapWindow_;
+        twapWindowLong = twapWindowLong_;
         reactor = reactor_;
         router = router_;
         feeRecipient = feeRecipient_;
@@ -256,19 +262,26 @@ contract AlDiaLease {
         return (quoteAtTwap(pesoIn) * (BPS - maxSlippageBps)) / BPS;
     }
 
-    /// @notice USD₮ for `pesoIn` at the pool's time-weighted price over `twapWindow`.
+    /// @notice USD₮ for `pesoIn` at the higher of the pool's short and long time-weighted prices.
+    /// @dev If the pool's history does not reach back over the long window, the short one stands alone.
     function quoteAtTwap(uint256 pesoIn) public view returns (uint256) {
-        return (pesoIn * priceQ128(twapTick())) >> 128;
+        uint256 short_ = (pesoIn * priceQ128(twapTick(twapWindow))) >> 128;
+        try this.twapTick(twapWindowLong) returns (int24 tick) {
+            uint256 long_ = (pesoIn * priceQ128(tick)) >> 128;
+            return long_ > short_ ? long_ : short_;
+        } catch {
+            return short_;
+        }
     }
 
-    function twapTick() public view returns (int24) {
+    function twapTick(uint32 window) public view returns (int24) {
         uint32[] memory ago = new uint32[](2);
-        ago[0] = twapWindow;
+        ago[0] = window;
         (int56[] memory cum,) = pool.observe(ago);
         int56 delta = cum[1] - cum[0];
-        int56 window = int56(uint56(twapWindow));
-        int56 tick = delta / window;
-        if (delta < 0 && delta % window != 0) tick--; // round toward negative infinity, as Uniswap's oracle does
+        int56 span = int56(uint56(window));
+        int56 tick = delta / span;
+        if (delta < 0 && delta % span != 0) tick--; // round toward negative infinity, as Uniswap's oracle does
         return int24(tick);
     }
 
