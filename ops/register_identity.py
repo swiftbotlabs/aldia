@@ -6,7 +6,7 @@ from eth_abi import encode
 from eth_utils import keccak
 
 REGISTRY = "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432"
-URI = "https://raw.githubusercontent.com/swiftbotlab/aldia/main/agent.json"
+URI = "https://aldia.swiftbotlab.workers.dev/agent.json"  # the first registration used the old GitHub account, now gone; see set_agent_uri.py
 data = celo.sel("register(string)") + encode(["string"], [URI])
 s = celo.TaggedSender()
 call = {"from": s.address, "to": REGISTRY, "data": "0x" + (data + celo.SUFFIX).hex()}
