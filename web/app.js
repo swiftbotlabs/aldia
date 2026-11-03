@@ -7,6 +7,9 @@ const TX_URL = (t) => `https://celoscan.io/tx/${t}`;
 const INDEC_PAGE = "https://www.indec.gob.ar/indec/web/Nivel4-Tema-3-5-31";
 const BCRA_PAGE = "https://www.bcra.gob.ar/estadisticas-indicadores/";
 const app = document.getElementById("app");
+const SAMPLE_TENANT = "c658d0b11729"; // the builder-test lease the calculator's worked example recomputes
+// The Worker sends each page already rendered. The first view replaces it in place, without a "Cargando…" flash.
+let hydrating = app.dataset.ssr === location.pathname;
 
 function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
@@ -34,7 +37,7 @@ const dayMonth = (d) => new Intl.DateTimeFormat("es-AR", { day: "numeric", month
 const short = (a) => (a ? a.slice(0, 6) + "…" + a.slice(-4) : "");
 const nowMonth = () => new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 7);
 
-const { addMonths, monthsBetween, rentForMonth } = window.AlDiaRent;
+const { addMonths, monthsBetween, rentForMonth, termsFromDetail } = window.AlDiaRent;
 
 async function api(path, opts) {
   const r = await fetch(path, opts);
@@ -49,6 +52,8 @@ async function indices() {
 }
 
 function shell(...content) {
+  const first = hydrating;
+  hydrating = false;
   app.replaceChildren(
     h("header", { class: "top" },
       h("a", { class: "brand", href: "/", "data-link": 1 }, h("img", { src: "/logo.svg", alt: "" }), "Al Día"),
@@ -57,9 +62,13 @@ function shell(...content) {
     h("footer", {}, h("div", { class: "wrap" },
       h("p", {}, "Al Día es un producto de Swift Bot Labs. No somos una inmobiliaria ni un banco, y este sitio no reemplaza tu contrato ni un asesoramiento legal o impositivo."),
       h("p", {}, h("a", { href: "/transparencia", "data-link": 1 }, "Transparencia"), " · ",
-        h("a", { href: "https://github.com/swiftbotlab/aldia", rel: "noopener" }, "Código abierto"), " · Índices: ",
+        h("a", { href: "https://github.com/swiftbotlabs/aldia", rel: "noopener" }, "Código abierto"), " · Índices: ",
         h("a", { href: INDEC_PAGE, rel: "noopener" }, "INDEC"), " y ", h("a", { href: BCRA_PAGE, rel: "noopener" }, "BCRA")))));
-  window.scrollTo(0, 0);
+  if (!first) window.scrollTo(0, 0);
+}
+// A loading placeholder, skipped while the server-rendered page is still on screen.
+function loading(...content) {
+  if (!hydrating) shell(...content);
 }
 
 /* ---------- Home ---------- */
@@ -126,16 +135,66 @@ function explainRent(r, lease) {
   const rows = [["Monto inicial", ars(r.baseRent)], ["Aumento acumulado", "+" + pctf(r.pct)]];
   if (r.stepPct !== undefined) rows.push(["Último aumento", "+" + pctf(r.stepPct)]);
   if (r.monthsUsed) rows.push(["Meses de IPC usados", r.monthsUsed.map((m) => monthName(m, false)).join(", ") + " " + r.monthsUsed.at(-1).slice(0, 4)]);
-  if (r.index === "ICL") rows.push(["ICL usado", `${String(r.levelFrom).replace(".", ",")} → ${String(r.levelTo).replace(".", ",")}`]);
+  const lv = (v) => (Number.isFinite(v) ? String(v).replace(".", ",") : "—");
+  if (r.index === "ICL") rows.push(["ICL usado", `${lv(r.levelFrom)} → ${lv(r.levelTo)}`]);
   return h("div", {},
     h("dl", { class: "kv" }, rows.map(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])),
     r.index === "IPC" ? h("p", { class: "small muted", style: "margin-top:10px" }, "Fuente: ", h("a", { href: INDEC_PAGE, rel: "noopener" }, "INDEC, IPC nivel general nacional"), ".") : null,
     r.index === "ICL" ? h("p", { class: "small muted", style: "margin-top:10px" }, "Fuente: ", h("a", { href: BCRA_PAGE, rel: "noopener" }, "BCRA, Índice para Contratos de Locación"), ".") : null);
 }
 
+// The worked example: the sample tenant's IPC rent recomputed from the official series. Same as worker/pages.js.
+function workedExample(pub, idx) {
+  if (!pub || pub.builderTest !== true || !pub.current || !idx || !idx.ipc) return null;
+  const d = pub.current.detail;
+  const terms = termsFromDetail(d, pub.periodMonths);
+  if (!terms) return null;
+  const r = rentForMonth(terms, d.month, idx);
+  if (!r || r.missing || !r.refFrom || !r.refTo) return null;
+  const from = idx.ipc[r.refFrom];
+  const to = idx.ipc[r.refTo];
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return null;
+  return { terms, r, from, to, factor: to / from, agent: Number.isFinite(pub.current.amount) ? pub.current.amount : null, label: pub.propertyLabel };
+}
+const level = (n) => new Intl.NumberFormat("es-AR", { maximumFractionDigits: 4 }).format(n);
+const factor6 = (n) => new Intl.NumberFormat("es-AR", { minimumFractionDigits: 6, maximumFractionDigits: 6 }).format(n);
+function exampleCard(ex) {
+  if (!ex) return null;
+  const { terms, r, from, to, factor, agent, label } = ex;
+  const period = (PERIODS.find(([n]) => n === terms.periodMonths) || [0, ""])[1].toLowerCase();
+  return h("section", { class: "card", id: "ejemplo" },
+    h("h2", {}, "Ejemplo resuelto"),
+    h("p", { class: "small muted" }, "El ", h("a", { href: `/pagar/${SAMPLE_TENANT}`, "data-link": 1 }, "contrato de prueba"), ` «${label}», con los datos que publica el agente, recalculado acá con los índices oficiales.`),
+    h("dl", { class: "kv" },
+      h("dt", {}, "Alquiler inicial"), h("dd", {}, ars(terms.baseRent)),
+      h("dt", {}, "Inicio del contrato"), h("dd", {}, monthName(terms.startDate.slice(0, 7))),
+      h("dt", {}, "Índice"), h("dd", {}, `${INDEX_NAMES.IPC}, ${period}`),
+      h("dt", {}, "Alquiler de"), h("dd", {}, monthName(r.month))),
+    h("p", { class: "small", style: "margin:12px 0 4px" }, `IPC de ${monthName(r.refTo)}: ${level(to)}`, h("br"), `IPC de ${monthName(r.refFrom)}: ${level(from)}`),
+    h("p", { class: "small", style: "margin:0 0 4px" }, `${level(to)} ÷ ${level(from)} = ${factor6(factor)}`),
+    h("p", { class: "small", style: "margin:0" }, `${ars(terms.baseRent)} × ${factor6(factor)} = `, h("b", {}, ars(r.amount)), ", redondeado al peso."),
+    explainRent(r),
+    agent === null ? null : h("p", { class: "small", style: "margin:12px 0 0" },
+      agent === r.amount ? `El agente cobró ${ars(agent)} en ese contrato: coincide.` : `El agente publicó ${ars(agent)} para ese mes.`));
+}
+
+// Inputs can come from the query string: the server-rendered form is a plain GET form that works without JavaScript.
+function calcStart() {
+  const q = new URLSearchParams(location.search);
+  const inicio = q.get("inicio") || "";
+  return {
+    baseRent: (q.get("alquiler") || "").slice(0, 20),
+    startDate: /^\d{4}-\d{2}-\d{2}$/.test(inicio) ? inicio : "",
+    index: ["IPC", "ICL", "FIJO"].includes(q.get("indice")) ? q.get("indice") : "IPC",
+    periodMonths: [1, 2, 3, 4, 6, 12].includes(+q.get("cada")) ? +q.get("cada") : 3,
+    lagMonths: [1, 2].includes(+q.get("meses")) ? +q.get("meses") : 2,
+    fixedPct: (q.get("pct") || "").slice(0, 8),
+  };
+}
+
 async function viewCalc() {
   document.title = "Calculadora de aumento de alquiler · Al Día";
-  const s = { baseRent: "", startDate: "", index: "IPC", periodMonths: 3, lagMonths: 2, fixedPct: "" };
+  const s = calcStart();
   const result = h("div", {});
   function compute(idx) {
     const base = parseInt(String(s.baseRent).replace(/\D/g, ""), 10);
@@ -158,27 +217,32 @@ async function viewCalc() {
       h("p", { class: "muted small", style: "margin-top:12px" }, `Próximo aumento: ${monthName(next)}.`),
       h("a", { class: "btn block", href: "/nuevo", "data-link": 1 }, "Que se haga solo todos los meses")));
   }
-  shell(h("h1", {}, "Calculadora de aumento"),
-    h("p", { class: "muted" }, "Gratis y con datos oficiales. No hace falta registrarse."),
-    h("div", { class: "card", id: "calc" }, h("p", { class: "muted" }, "Cargando índices…")),
-    result);
+  const head = [h("h1", {}, "Calculadora de aumento"), h("p", { class: "muted" }, "Gratis y con datos oficiales. No hace falta registrarse.")];
+  loading(...head, h("div", { class: "card", id: "calc" }, h("p", { class: "muted" }, "Cargando índices…")));
+  const pubP = api(`/api/lease/${SAMPLE_TENANT}`).catch(() => null);
   let idx;
   try {
     idx = await indices();
   } catch {
-    document.getElementById("calc").replaceChildren(h("div", { class: "note err" }, "No pudimos traer los índices. Probá en un rato."));
+    shell(...head, h("div", { class: "card", id: "calc" }, h("div", { class: "note err" }, "No pudimos traer los índices. Probá en un rato.")));
     return;
   }
   const run = () => compute(idx);
-  const fixedRow = h("div", { style: s.index === "FIJO" ? "" : "display:none" }, field("Porcentaje de cada aumento", h("input", { inputmode: "decimal", placeholder: "10", oninput: (e) => { s.fixedPct = e.target.value; run(); } })));
-  const lagRow = h("div", {}, field("Meses de IPC", selectEl(2, [[2, "El último publicado al inicio del mes (lo más común)"], [1, "Incluye el mes anterior al aumento"]], (v) => { s.lagMonths = +v; run(); })));
-  document.getElementById("calc").replaceChildren(
-    field("Alquiler inicial del contrato", h("input", { inputmode: "numeric", placeholder: "$ 500.000", autocomplete: "off", oninput: (e) => { s.baseRent = e.target.value; run(); } })),
-    field("Fecha de inicio del contrato", h("input", { type: "date", oninput: (e) => { s.startDate = e.target.value; run(); } })),
-    field("¿Con qué índice aumenta?", selectEl("IPC", Object.entries(INDEX_NAMES), (v) => { s.index = v; fixedRow.style.display = v === "FIJO" ? "" : "none"; lagRow.style.display = v === "IPC" ? "" : "none"; run(); })),
-    field("¿Cada cuánto aumenta?", selectEl(3, PERIODS, (v) => { s.periodMonths = +v; run(); })),
-    lagRow, fixedRow,
-    h("p", { class: "tiny", style: "margin:12px 0 0" }, `IPC disponible hasta ${monthName(idx.ipcLast)}. Datos leídos de INDEC y BCRA el ${idx.retrievedAt.slice(0, 10)}.`));
+  const fixedRow = h("div", { style: s.index === "FIJO" ? "" : "display:none" }, field("Porcentaje de cada aumento", h("input", { inputmode: "decimal", placeholder: "10", value: s.fixedPct, oninput: (e) => { s.fixedPct = e.target.value; run(); } })));
+  const lagRow = h("div", { style: s.index === "IPC" ? "" : "display:none" }, field("Meses de IPC", selectEl(s.lagMonths, [[2, "El último publicado al inicio del mes (lo más común)"], [1, "Incluye el mes anterior al aumento"]], (v) => { s.lagMonths = +v; run(); })));
+  const example = h("div", {});
+  shell(...head,
+    h("div", { class: "card", id: "calc" },
+      field("Alquiler inicial del contrato", h("input", { inputmode: "numeric", placeholder: "$ 500.000", autocomplete: "off", value: s.baseRent, oninput: (e) => { s.baseRent = e.target.value; run(); } })),
+      field("Fecha de inicio del contrato", h("input", { type: "date", value: s.startDate, oninput: (e) => { s.startDate = e.target.value; run(); } })),
+      field("¿Con qué índice aumenta?", selectEl(s.index, Object.entries(INDEX_NAMES), (v) => { s.index = v; fixedRow.style.display = v === "FIJO" ? "" : "none"; lagRow.style.display = v === "IPC" ? "" : "none"; run(); })),
+      field("¿Cada cuánto aumenta?", selectEl(s.periodMonths, PERIODS, (v) => { s.periodMonths = +v; run(); })),
+      lagRow, fixedRow,
+      h("p", { class: "tiny", style: "margin:12px 0 0" }, `IPC disponible hasta ${monthName(idx.ipcLast)}. Datos leídos de INDEC y BCRA el ${idx.retrievedAt.slice(0, 10)}.`)),
+    result, example);
+  run();
+  const card = exampleCard(workedExample(await pubP, idx));
+  if (card) example.replaceChildren(card);
 }
 
 /* ---------- New lease ---------- */
@@ -432,7 +496,9 @@ async function sha256Hex(text) {
   const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
-const clauseNote = (c) => (c && c.clauseCheck ? h("p", { class: "small", style: "margin:10px 0 0" }, c.clauseCheck.ok ? "Revisamos este aumento contra la cláusula del contrato: coincide." : "Ojo: este aumento podría no coincidir con la cláusula del contrato. ", c.clauseCheck.ok ? null : c.clauseCheck.note) : null);
+const isTx = (t) => typeof t === "string" && /^0x[0-9a-fA-F]{64}$/.test(t);
+const clauseNote = (c) => (c && c.clauseCheck ? h("p", { class: "small", style: "margin:10px 0 0" }, c.clauseCheck.ok ? "Revisamos este aumento contra la cláusula del contrato: coincide." : "Ojo: este aumento podría no coincidir con la cláusula del contrato. ", c.clauseCheck.ok ? null : c.clauseCheck.note,
+  isTx(c.clauseCheck.tx) ? [" ", h("a", { href: TX_URL(c.clauseCheck.tx), rel: "noopener" }, "Ver la revisión paga en Celo"), "."] : null) : null);
 const rampUrl = (amount, address) => `https://ramp.ripio.com/?country=AR&chain=42220&token=WARS&amount=${amount}&address=${address}`;
 
 async function payWithWallet(pub, status) {
@@ -454,7 +520,7 @@ async function payWithWallet(pub, status) {
 
 async function viewPay(id) {
   document.title = "Pagar alquiler · Al Día";
-  shell(h("p", { class: "muted" }, "Cargando…"));
+  loading(h("p", { class: "muted" }, "Cargando…"));
   let pub;
   try {
     pub = await api(`/api/lease/${id}`);
@@ -468,6 +534,7 @@ async function viewPay(id) {
     return;
   }
   const c = pub.current;
+  document.title = `${c ? `Alquiler de ${monthName(c.month, false)} · ` : ""}${pub.propertyLabel} · Al Día`;
   const status = h("div", {});
   const open = c && c.status !== "pagado" && c.amount && !pub.closed;
   const owed = c ? c.amount - (c.received || 0) : 0;
@@ -564,7 +631,7 @@ async function viewPanel(id) {
     shell(h("h1", {}, "Necesitás tu link privado"), h("p", { class: "muted" }, "Abrí el link que guardaste cuando creaste el contrato."));
     return;
   }
-  shell(h("p", { class: "muted" }, "Cargando…"));
+  loading(h("p", { class: "muted" }, "Cargando…"));
   let d;
   try {
     d = await api(`/api/panel/${id}`, { headers: { "x-aldia-key": token } });
@@ -644,7 +711,7 @@ async function viewPanel(id) {
 /* ---------- Receipt ---------- */
 async function viewReceipt(id, month) {
   document.title = "Recibo · Al Día";
-  shell(h("p", { class: "muted" }, "Cargando…"));
+  loading(h("p", { class: "muted" }, "Cargando…"));
   let r;
   try {
     r = await api(`/api/recibo/${id}/${month}`);
@@ -652,6 +719,7 @@ async function viewReceipt(id, month) {
     shell(h("h1", {}, "No hay recibo para ese mes"));
     return;
   }
+  document.title = `Recibo de ${monthName(month)} · ${r.propertyLabel} · Al Día`;
   shell(r.builderTest ? h("div", { class: "note warn" }, "Recibo de prueba de Swift Bot Labs. No hay propietario ni inquilino reales.") : null,
     h("section", { class: "card" },
       h("h1", {}, `Recibo de ${monthName(month)}`),
@@ -677,11 +745,12 @@ async function viewReceipt(id, month) {
 /* ---------- Transparency ---------- */
 async function viewTransparency() {
   document.title = "Transparencia · Al Día";
-  shell(h("h1", {}, "Transparencia"), h("p", { class: "muted" }, "Cargando…"));
+  loading(h("h1", {}, "Transparencia"), h("p", { class: "muted" }, "Cargando…"));
   let s = {};
   let idx = null;
+  let rents = [];
   try {
-    [s, idx] = await Promise.all([api("/api/stats"), indices().catch(() => null)]);
+    [s, idx, rents] = await Promise.all([api("/api/stats"), indices().catch(() => null), api("/api/pruebas").catch(() => [])]);
   } catch { /* show what we have */ }
   const n = (v) => (v === undefined ? "—" : v);
   shell(h("h1", {}, "Transparencia"),
@@ -710,6 +779,17 @@ async function viewTransparency() {
         h("dt", {}, "Billetera del agente"), h("dd", {}, h("a", { href: LEASE_URL("0xED120aeC2240A25125B3f32Eb8Bff9C5F688121b"), rel: "noopener", class: "mono" }, "0xED12…121b")),
         h("dt", {}, "Fábrica de cuentas"), h("dd", {}, h("a", { href: LEASE_URL("0x1e7cbf5d31c85b168048115d0ae762463a475882"), rel: "noopener", class: "mono" }, "0x1e7c…5882"))),
       s.leases && s.leases.length ? h("table", { style: "margin-top:10px" }, s.leases.map((l) => h("tr", {}, h("td", {}, l.label), h("td", { class: "r" }, l.kind)))) : null),
+    rents && rents.length ? h("section", { class: "card", id: "pruebas" },
+      h("h3", {}, "Alquileres de prueba cobrados"),
+      h("p", { class: "small muted" }, "Los pagamos nosotros con wARS propios para probar el ciclo completo. Cada uno tiene su recibo y sus operaciones en la red Celo."),
+      h("table", {}, h("tr", {}, h("th", {}, "Contrato"), h("th", { class: "r" }, "Monto"), h("th", { class: "r" }, "En Celo")),
+        rents.map((x) => h("tr", {},
+          h("td", {}, h("a", { href: x.receipt, "data-link": 1 }, x.label), h("br"), h("span", { class: "tiny" }, monthName(x.month), x.route ? ` · ${x.route}` : "")),
+          h("td", { class: "r" }, ars(x.amount)),
+          h("td", { class: "r" },
+            x.paymentTxs.map((t, i) => [h("a", { href: TX_URL(t), rel: "noopener" }, "pago" + (x.paymentTxs.length > 1 ? " " + (i + 1) : "")), h("br")]),
+            x.settleTx ? [h("a", { href: TX_URL(x.settleTx), rel: "noopener" }, "liquidación"), h("br")] : null,
+            x.lease ? h("a", { href: LEASE_URL(x.lease), rel: "noopener" }, "cuenta") : null))))) : null,
     s.paidCalls ? h("section", { class: "card" },
       h("h3", {}, "Servicios que pagamos"),
       h("p", { class: "small muted" }, `${s.paidCalls.count} llamadas pagas por x402 en Celo, por ${usd3(s.paidCalls.usd)} en total, desde la billetera del agente.`),

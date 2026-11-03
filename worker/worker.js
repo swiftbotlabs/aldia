@@ -1,6 +1,7 @@
 // Al Día public site and API on Cloudflare Workers. Holds no keys and moves no money: it stores what people type and
 // shows what the agent publishes. The agent runs elsewhere and reaches this Worker over outbound HTTPS only.
 import { ASSETS } from "./assets.js";
+import { renderPage, renderLlms, testRents } from "./pages.js";
 
 const MAX_BODY = 40_000;
 const AGENT_WALLET = "0xed120aec2240a25125b3f32eb8bff9c5f688121b";
@@ -233,6 +234,7 @@ async function api(req, env, path) {
   if (path === "/api/indices") return (await kvJson(env, "indices")) || fail(503, "not_ready", "Todavía no hay índices.");
   if (path === "/api/stats") return (await kvJson(env, "stats")) || json({});
   if (path === "/api/health") return (await kvJson(env, "health")) || json({});
+  if (path === "/api/pruebas") return json(await testRents(env));
   let m = path.match(/^\/api\/leer\/([0-9a-f]{16})$/);
   if (m) return (await kvJson(env, `readres:${m[1]}`)) || json({ status: "working" });
   m = path.match(/^\/api\/lease\/([0-9a-f]{12})$/);
@@ -277,7 +279,16 @@ export default {
       if (path.startsWith("/agent/")) return await agentApi(req, env, path);
       if (path.startsWith("/api/")) return await api(req, env, path);
       if (req.method !== "GET" && req.method !== "HEAD") return fail(405, "method", "no");
-      return asset(path) || asset("/index.html");
+      if (path === "/llms.txt") {
+        const text = await renderLlms(url, env);
+        return new Response(text, { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=300", ...SECURITY } });
+      }
+      if (path === "/index.html") return new Response(null, { status: 301, headers: { location: "/", ...SECURITY } });
+      const a = asset(path);
+      if (a) return a;
+      // Every page is rendered here with its real content; the browser app takes over when JavaScript runs.
+      const page = await renderPage(url, env);
+      return new Response(page.html, { status: page.status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=60", ...SECURITY } });
     } catch (e) {
       console.log("error", path, String(e).slice(0, 200));
       return fail(500, "error", "Algo salió mal. Probá de nuevo en un rato.");

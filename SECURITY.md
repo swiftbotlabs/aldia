@@ -21,6 +21,7 @@ Lease addresses are computed ahead of time, and the contract is deployed when mo
 - A model is called only to read redacted contract text and to compare a calculation with a clause. It has no tools and no keys. Its answer is validated field by field and only fills a form or a note. It never moves money.
 - PDFs are parsed in the landlord's browser, not on our machines. DNI, CUIT, CBU, mail and phone are removed there before any text leaves the phone.
 - Page text is built as DOM text nodes, so a label cannot become markup, and the CSP blocks inline scripts.
+- The Worker also renders every public page as HTML, so it reads without JavaScript. Every value it prints goes through one escaping template in `worker/pages.js`, and a link is built only from a value that matches a strict pattern (transaction hash, address, month). It reads only the records the public API already serves, adds no inline script and leaves the CSP as it was. The landlord panel stays client-side: its key never reaches the server.
 - Creation and contract-reading calls have per-IP limits and daily caps. These are best-effort: storage is eventually consistent, so a burst can overshoot them. Paid calls have a per-call and a daily spending ceiling written before the money moves, one attempt per charge, and an allowlist of hosts.
 - One failing lease is retried with a growing delay and never stops the others. The agent signs Textile's taker-control digest only after computing it locally, never from an RPC answer.
 

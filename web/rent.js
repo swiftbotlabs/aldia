@@ -47,5 +47,16 @@ function rentForMonth(lease, month, idx) {
   return out;
 }
 
-  root.AlDiaRent = { addMonths, monthsBetween, rentForMonth };
+// The terms behind a published IPC charge, rebuilt from the charge's own detail (refFrom = start - lag, refTo = adjustment
+// - lag), so a page can recompute the agent's number with this file instead of trusting it.
+function termsFromDetail(d, periodMonths) {
+  const ym = /^\d{4}-(0[1-9]|1[0-2])$/;
+  if (!d || d.index !== "IPC" || !(d.adjustments > 0) || !Number.isInteger(d.baseRent) || ![1, 2, 3, 4, 6, 12].includes(periodMonths)) return null;
+  if (!ym.test(d.refFrom || "") || !ym.test(d.refTo || "") || !ym.test(d.adjustmentMonth || "") || !ym.test(d.month || "")) return null;
+  const lagMonths = monthsBetween(d.refTo, d.adjustmentMonth);
+  if (lagMonths !== 1 && lagMonths !== 2) return null;
+  return { baseRent: d.baseRent, startDate: addMonths(d.refFrom, lagMonths) + "-01", index: "IPC", periodMonths, lagMonths, fixedPct: 0 };
+}
+
+  root.AlDiaRent = { addMonths, monthsBetween, rentForMonth, termsFromDetail };
 })(typeof window !== "undefined" ? window : globalThis);
