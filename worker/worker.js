@@ -3,7 +3,7 @@
 import { ASSETS } from "./assets.js";
 import { renderPage, renderLlms, testRents, probarId, cleanOutside } from "./pages.js";
 import { renderProbar, probarApi, probarTerms, LIMITS as PROBAR_LIMITS } from "./probar.js";
-import { outsideSummary } from "./outside.js";
+import { outsideSummary, RAMP_WALLETS, RAMP_TOLERANCE_PCT } from "./outside.js";
 import { checksumOk } from "./eip55.js";
 
 const MAX_BODY = 40_000;
@@ -305,7 +305,7 @@ async function api(req, env, path, ctx) {
   if (path === "/api/pruebas") return json(await testRents(env));
   if (path === "/api/externos") {
     const o = cleanOutside(await outsideSummary(env, ctx && ctx.waitUntil ? (p) => ctx.waitUntil(p) : null));
-    return json({ ...o, rule: { cutoff: "2026-10-06", label: "fellow hackathon builder" } }, 200, { "cache-control": "public, max-age=60" });
+    return json({ ...o, rule: { cutoff: "2026-10-06", label: "fellow hackathon builder", ramp: { wallets: RAMP_WALLETS, tolerancePct: RAMP_TOLERANCE_PCT, label: "tenant paying by bank transfer (Ripio)" } } }, 200, { "cache-control": "public, max-age=60" });
   }
   let m = path.match(/^\/api\/leer\/([0-9a-f]{16})$/);
   if (m) return (await kvJson(env, `readres:${m[1]}`)) || json({ status: "working" });

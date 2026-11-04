@@ -6,6 +6,16 @@
 //  - the wallet is not ours, its first funds did not come from one of our wallets, and its first Celo activity is
 //    before 2026-10-06 (the hackathon's independent-user rule).
 // Anything we cannot read or prove is not counted (fail closed). Only Blockscout's v2 API is called, from fixed URL parts.
+//
+// A rent paid by bank transfer through Ripio's ramp arrives from Ripio's own wallet, not the tenant's, so it is judged by
+// its own rule (rampMonth below) and never as a wallet payer. It counts as an outside payment only when all of this holds:
+//  - the wARS came from a known Ripio ramp wallet, and that same wallet signed the transaction (nobody relayed it);
+//  - the lease is not one of our builder tests, and its landlord (the payout address in the Worker's own lease record) is
+//    not one of our wallets, is not a ramp wallet, and never received anything from one of our wallets up to the payment;
+//  - what Ripio delivered for that month is within 2% of the charge the tenant page asked for (the month's rent, or what
+//    was still owed after other payments that month); the agent itself accepts up to 2% short from the ramp.
+// We have no Ripio account (it needs an Argentine bank account and Ripio's identity check), so a wARS delivery from
+// Ripio's wallet is a payment by someone else. Each ramp-paid lease counts once per landlord, never per transfer.
 
 export const CUTOFF_DAY = "2026-10-06";
 export const CUTOFF = Date.UTC(2026, 9, 6) / 1000;
@@ -29,7 +39,13 @@ const FUNDING = new Set([
   "0xd2ab3c9a02dbbab236bfec45d1d755df4267f771", // USAT
   WARS,
 ]);
-export const REASONS = ["ok", "ours", "funded-by-us", "new-wallet", "unclear", "no-history", "indirect", "partial", "unchecked", "invalid"];
+export const REASONS = ["ok", "ours", "funded-by-us", "new-wallet", "unclear", "no-history", "indirect", "partial", "unchecked", "invalid", "ramp-amount"];
+// Ripio's ramp delivery wallet on Celo, identified from public chain data on 2026-11-04 (not confirmed by Ripio): active
+// since Feb 2025, refilled with wARS by one treasury wallet (0xcacebc09...) and paying round peso amounts to dozens of
+// unrelated wallets with plain transfers, which is what an on-ramp does. Another Ripio wallet can be added without a code
+// change through the RAMP_SENDERS setting. A delivery from a wallet that is not listed is judged as a normal wallet payer.
+export const RAMP_WALLETS = ["0x0f776cc057622f0da2f257d2b987a7cf3386b7cc"];
+export const RAMP_TOLERANCE_PCT = 2;
 
 const ADDR = /^0x[0-9a-f]{40}$/;
 const TX = /^0x[0-9a-f]{64}$/;
@@ -42,6 +58,18 @@ const big = (v) => {
     return 0n;
   }
 };
+
+export function rampWallets(env) {
+  const raw = env && env.RAMP_SENDERS;
+  // "none" exists for the tests' positive control only: it runs the old rule, with no ramp wallets at all.
+  if (raw === "none") return new Set();
+  const s = new Set(RAMP_WALLETS);
+  for (const a of String(raw || "").split(/[\s,]+/)) {
+    const x = a.trim().toLowerCase();
+    if (ADDR.test(x)) s.add(x);
+  }
+  return s;
+}
 
 export function ourWallets(env) {
   const s = new Set(Object.values(PUBLIC_OURS));
@@ -197,7 +225,7 @@ export async function paymentRows(get, collector, txs) {
     const byFrom = new Map();
     for (const t of ins) byFrom.set(hashOf(t.from), (byFrom.get(hashOf(t.from)) || 0n) + big(t.total && t.total.value));
     for (const [from, value] of byFrom) {
-      rows.push({ tx, from, sender, wars: Number(value / 10n ** 18n), ts: tsOf(ins[0].timestamp) || 0 });
+      rows.push({ tx, from, sender, wars: Number(value / 10n ** 18n), ts: tsOf(ins[0].timestamp) || 0, b: Number(ins[0].block_number) || 0 });
     }
   }
   return { rows, missing };
@@ -232,7 +260,7 @@ async function receiptTxs(env, id, month) {
 }
 
 async function cachedRows(env, id, month, collector, txs, get, b) {
-  const key = `payrows:${id}:${month}`;
+  const key = `payrows2:${id}:${month}`;
   const hit = await kvGet(env, key);
   if (hit && Array.isArray(hit.rows) && hit.txs === txs.join(",")) return hit.rows;
   if (!b.take(1 + txs.length)) return null;
@@ -261,9 +289,69 @@ export async function walletVerdict(env, address, get, ours, tag, b) {
   return out;
 }
 
+// The landlord side of a ramp payment: no wallet of ours ever sent this address anything, up to block `B` (the payment).
+// A brand-new wallet passes: a bank-transfer tenant does not need any Celo history. Too much to read = not counted.
+export async function landlordClean(address, get, ours, B) {
+  const a = lc(address);
+  if (!ADDR.test(a)) return { reason: "invalid", final: true };
+  if (ours.has(a)) return { reason: "ours", final: true };
+  const d = await get(`addresses/${a}/transactions`, { sort: "block_number", order: "asc" });
+  const txs = itemsOf(d).map((t) => ({ b: Number(t.block_number), from: hashOf(t.from), to: hashOf(t.to), value: big(t.value), failed: t.status !== "ok" }));
+  if (nextOf(d) && txs.length && txs[txs.length - 1].b <= B) return { reason: "unclear", final: true };
+  let toks;
+  let ints;
+  try {
+    toks = await upTo(get, `addresses/${a}/token-transfers`, { type: "ERC-20", filter: "to" }, B, 2);
+    ints = await upTo(get, `addresses/${a}/internal-transactions`, { filter: "to" }, B, 2, { transaction_index: "0" });
+  } catch (e) {
+    if (/too many transfers/.test(String(e))) return { reason: "unclear", final: true };
+    throw e;
+  }
+  const incoming = [
+    ...txs,
+    ...toks.map((t) => ({ b: Number(t.block_number), from: hashOf(t.from), to: hashOf(t.to), value: big(t.total && t.total.value), failed: false })),
+    ...ints.map((t) => ({ b: Number(t.block_number), from: hashOf(t.from), to: hashOf(t.to), value: big(t.value), failed: t.success !== true })),
+  ].filter((e) => Number.isFinite(e.b) && e.b > 0 && e.b <= B && e.to === a && e.value > 0n && !e.failed);
+  if (incoming.some((e) => ours.has(e.from))) return { reason: "funded-by-us", final: true };
+  return { reason: "ok", final: true };
+}
+
+async function rampLandlord(env, ctx, landlord, B) {
+  const { get, ours, ramp, tag, b } = ctx;
+  if (ours.has(landlord)) return "ours";
+  if (ramp.has(landlord)) return "unclear";
+  const key = `rampll:${tag}:${landlord}:${B}`;
+  const hit = await kvGet(env, key);
+  if (hit && REASONS.includes(hit.reason)) return hit.reason;
+  if (!b.take(5)) return "unchecked";
+  let v;
+  try {
+    v = await landlordClean(landlord, get, ours, B);
+  } catch {
+    return "unchecked";
+  }
+  await env.KV.put(key, JSON.stringify({ reason: v.reason, checkedAt: new Date().toISOString() }));
+  return v.reason;
+}
+
+// One verdict for everything Ripio delivered to one lease in one month (the rule is at the top of this file).
+async function rampMonth(env, ctx, id, rt, rows, direct) {
+  const lease = await kvGet(env, `lease:${id}`);
+  const landlord = lease ? lc(lease.payout) : "";
+  if (!ADDR.test(landlord)) return { counted: false, reason: "unclear" };
+  const rampSum = direct.reduce((a, r) => a + r.wars, 0);
+  const others = rows.filter((r) => !direct.includes(r)).reduce((a, r) => a + r.wars, 0);
+  const near = (want) => want > 0 && Math.abs(rampSum - want) * 100 <= RAMP_TOLERANCE_PCT * want;
+  if (!rt.amount || !(near(rt.amount) || near(rt.amount - others))) return { counted: false, reason: ctx.ours.has(landlord) ? "ours" : "ramp-amount" };
+  const B = Math.max(...direct.map((r) => r.b));
+  if (!Number.isFinite(B) || B <= 0) return { counted: false, reason: "unchecked" };
+  const reason = await rampLandlord(env, ctx, landlord, B);
+  return { counted: reason === "ok", reason, key: (await sha256Hex("landlord:" + landlord)).slice(0, 12) };
+}
+
 // Every payment behind one settled month of one lease, each with its verdict.
 export async function judgeMonth(env, ctx, id, month, collector) {
-  const { get, ours, tag, b } = ctx;
+  const { get, ours, ramp, tag, b } = ctx;
   const rt = await receiptTxs(env, id, month);
   if (!rt || !rt.txs.length) return [];
   let rows;
@@ -275,10 +363,16 @@ export async function judgeMonth(env, ctx, id, month, collector) {
   if (!rows) return rt.txs.map((tx) => ({ id, month, tx, address: null, counted: false, reason: "unchecked", date: null }));
   const paidBy = new Map();
   for (const r of rows) paidBy.set(r.from, (paidBy.get(r.from) || 0) + r.wars);
+  // Ripio's deliveries: signed by the same ramp wallet that sent the wARS, judged together for the month.
+  const direct = rows.filter((r) => ramp.has(r.from) && r.sender === r.from);
+  const rv = direct.length ? await rampMonth(env, ctx, id, rt, rows, direct) : null;
   const out = [];
   for (const r of rows) {
     const base = { id, month, tx: r.tx, address: r.from, date: day(r.ts), wars: r.wars };
-    if (r.sender !== r.from) out.push({ ...base, counted: false, reason: ours.has(r.from) || ours.has(r.sender) ? "ours" : "indirect" });
+    if (ramp.has(r.from)) {
+      const ok = direct.includes(r) && rv;
+      out.push({ ...base, address: null, via: "ripio", counted: !!(ok && rv.counted), reason: ok ? rv.reason : "indirect", ...(ok && rv.key ? { key: rv.key } : {}) });
+    } else if (r.sender !== r.from) out.push({ ...base, counted: false, reason: ours.has(r.from) || ours.has(r.sender) ? "ours" : "indirect" });
     else if (rt.amount && paidBy.get(r.from) * 2 < rt.amount) out.push({ ...base, counted: false, reason: ours.has(r.from) ? "ours" : "partial" });
     else {
       const v = await walletVerdict(env, r.from, get, ours, tag, b);
@@ -291,7 +385,7 @@ export async function judgeMonth(env, ctx, id, month, collector) {
 export async function judgeContext(env, maxFetches) {
   const ours = ourWallets(env);
   const get = blockscoutGetter(env.FETCH || fetch, { retryMs: env.EXPLORER_RETRY_MS === undefined ? 1500 : Number(env.EXPLORER_RETRY_MS) });
-  return { get, ours, tag: await oursTag(ours), b: budget(maxFetches) };
+  return { get, ours, ramp: rampWallets(env), tag: await oursTag(ours), b: budget(maxFetches) };
 }
 
 function paidMonths(pub) {
@@ -323,18 +417,24 @@ export async function computeSummary(env, { maxFetches = 20 } = {}) {
 export function summarize(judged, complete) {
   const counted = judged.filter((r) => r.counted);
   const byPayer = new Map();
+  const ramp = [];
   for (const r of counted.sort((x, y) => String(x.date).localeCompare(String(y.date)))) {
+    if (r.via === "ripio") {
+      ramp.push({ tx: r.tx, date: r.date, id: r.id, month: r.month, wars: r.wars, key: r.key });
+      continue;
+    }
     if (!byPayer.has(r.address)) byPayer.set(r.address, { address: r.address, tx: r.tx, date: r.date, firstSeen: r.firstSeen || null, id: r.id, month: r.month, label: "builder", payments: 0 });
     byPayer.get(r.address).payments++;
   }
   const notCounted = judged.filter((r) => !r.counted).slice(0, 50).map((r) => ({
-    address: r.reason === "ours" ? null : r.address, reason: r.reason, tx: r.tx, date: r.date,
+    address: r.reason === "ours" || r.via === "ripio" ? null : r.address, reason: r.reason, tx: r.tx, date: r.date, ...(r.via === "ripio" ? { via: "ripio" } : {}),
   }));
-  return { v: 1, checkedAt: new Date().toISOString(), complete, count: byPayer.size, payments: counted.length, payers: [...byPayer.values()], notCounted, rule: { cutoff: CUTOFF_DAY } };
+  const rampPayers = new Set(ramp.map((r) => r.key)).size;
+  return { v: 2, checkedAt: new Date().toISOString(), complete, count: byPayer.size + rampPayers, payments: counted.length, payers: [...byPayer.values()], ramp, notCounted, rule: { cutoff: CUTOFF_DAY } };
 }
 
 // The stored summary, refreshed at most every few minutes; a refresh runs after the response when one is on screen already.
-export const EMPTY = { v: 1, checkedAt: null, complete: false, count: 0, payments: 0, payers: [], notCounted: [], rule: { cutoff: CUTOFF_DAY } };
+export const EMPTY = { v: 2, checkedAt: null, complete: false, count: 0, payments: 0, payers: [], ramp: [], notCounted: [], rule: { cutoff: CUTOFF_DAY } };
 // A Worker must not await I/O started by another request, so each refresh belongs to the request that starts it; this
 // stamp only stops one isolate from starting a second refresh while its first is still running.
 let startedAt = 0;

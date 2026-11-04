@@ -1,10 +1,10 @@
-// Server-rendered pages for Al Día. The browser app (web/app.js) draws the same pages and takes over when JavaScript
-// runs; these exist so every public page reads correctly without it: judges, crawlers, AI readers, slow phones.
+// Server-rendered pages for Al Día, in Spanish (default) and English (?lang=en). These are the pages: the browser app
+// (web/app.js) only adds interaction on top (wallet buttons, the live calculator, the lease form and the private panel).
 // Rules: every dynamic value goes through html``, which escapes it; a link is built only from a value that passes a strict
 // pattern; every figure comes from the records the agent publishes to KV (stats, indices, pub:, receipt:) or is computed
 // from the official index series with the same rent.js the browser uses. Nothing here moves money or holds a key.
 import { AlDiaRent } from "./rent.mjs";
-import { outsideSummary, CUTOFF_DAY } from "./outside.js";
+import { outsideSummary, CUTOFF_DAY, RAMP_TOLERANCE_PCT } from "./outside.js";
 
 const { addMonths, rentForMonth, termsFromDetail } = AlDiaRent;
 
@@ -35,8 +35,8 @@ export const TEST_RENTS = [
 const INDEC_PAGE = "https://www.indec.gob.ar/indec/web/Nivel4-Tema-3-5-31";
 const BCRA_PAGE = "https://www.bcra.gob.ar/estadisticas-indicadores/";
 const BOT = "https://t.me/AlDiaAvisosBot";
-const INDEX_NAMES = { IPC: "IPC (INDEC)", ICL: "ICL (BCRA)", FIJO: "Porcentaje fijo" };
-const PERIODS = [[1, "Todos los meses"], [2, "Cada 2 meses"], [3, "Cada 3 meses"], [4, "Cada 4 meses"], [6, "Cada 6 meses"], [12, "Cada 12 meses"]];
+const rampUrl = (amount, address) => `https://ramp.ripio.com/?country=AR&chain=42220&token=WARS&amount=${amount}&address=${address}`;
+export { rampUrl };
 
 /* ---------- escaping ---------- */
 class Raw {
@@ -58,7 +58,7 @@ export function html(strings, ...vals) {
   return new Raw(out);
 }
 
-/* ---------- checks and formats (same output as web/app.js) ---------- */
+/* ---------- checks ---------- */
 export const fin = (n) => typeof n === "number" && Number.isFinite(n);
 export const str = (s, max = 200) => (typeof s === "string" ? s.slice(0, max) : "");
 export const isMonth = (m) => typeof m === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(m);
@@ -68,16 +68,73 @@ export const isAddr = (a) => typeof a === "string" && /^0x[0-9a-fA-F]{40}$/.test
 export const txUrl = (t) => `https://celoscan.io/tx/${t}`;
 export const addrUrl = (a) => `https://celoscan.io/address/${a}`;
 export const short = (a) => a.slice(0, 6) + "…" + a.slice(-4);
-export const ars = (n) => (fin(n) ? new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n) : "—");
-const pctf = (n, d = 2) => (fin(n) ? new Intl.NumberFormat("es-AR", { maximumFractionDigits: d, minimumFractionDigits: 0 }).format(n) + " %" : "—");
-const usd = (n) => (fin(n) ? "US$ " + new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2, minimumFractionDigits: 2 }).format(n) : "—");
-const usd3 = (n) => (fin(n) ? "US$ " + new Intl.NumberFormat("es-AR", { maximumFractionDigits: 4, minimumFractionDigits: 2 }).format(n) : "—");
-const level = (n) => (fin(n) ? new Intl.NumberFormat("es-AR", { maximumFractionDigits: 4 }).format(n) : "—");
-const factor6 = (n) => new Intl.NumberFormat("es-AR", { minimumFractionDigits: 6, maximumFractionDigits: 6 }).format(n);
-export const monthName = (ym, year = true) =>
-  isMonth(ym) ? new Intl.DateTimeFormat("es-AR", { month: "long", ...(year ? { year: "numeric" } : {}), timeZone: "UTC" }).format(new Date(ym + "-15T00:00:00Z")) : "";
-export const dayMonth = (d) => (isDay(d) ? new Intl.DateTimeFormat("es-AR", { day: "numeric", month: "long", timeZone: "UTC" }).format(new Date(d.slice(0, 10) + "T12:00:00Z")) : "");
+const isId = (i) => typeof i === "string" && /^[0-9a-f]{12}$/.test(i);
 const nowMonth = () => new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 7);
+
+/* ---------- language: Spanish by default, English with ?lang=en on every page and every internal link ---------- */
+export const langOf = (url) => (url.searchParams.get("lang") === "en" ? "en" : "es");
+export function withLang(path, lang) {
+  if (lang !== "en") return path;
+  const i = path.indexOf("#");
+  const [p, h] = i < 0 ? [path, ""] : [path.slice(0, i), path.slice(i)];
+  return p + (p.includes("?") ? "&" : "?") + "lang=en" + h;
+}
+// The same page in the other language, keeping the rest of the query (the calculator's inputs).
+export function toggleHref(path, search, lang) {
+  const q = new URLSearchParams(search || "");
+  if (lang === "en") q.delete("lang");
+  else q.set("lang", "en");
+  const qs = q.toString();
+  return path + (qs ? "?" + qs : "");
+}
+// Formats and the phrase picker for one language. Amounts stay in pesos in both languages ("ARS 660,978" in English).
+export function fmt(lang) {
+  const en = lang === "en";
+  const loc = en ? "en-US" : "es-AR";
+  const nf = (o) => new Intl.NumberFormat(loc, o);
+  const dt = (o, d) => new Intl.DateTimeFormat(loc, { ...o, timeZone: "UTC" }).format(d);
+  return {
+    lang, en, loc,
+    s: (es, eng) => (en ? eng : es),
+    u: (p) => withLang(p, lang),
+    ars: (n) => (fin(n) ? nf({ style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n) : "—"),
+    ars2: (n) => (fin(n) ? nf({ style: "currency", currency: "ARS", minimumFractionDigits: 2 }).format(n) : "—"),
+    num: (n) => (fin(n) ? nf({ maximumFractionDigits: 0 }).format(n) : "—"),
+    pctf: (n, d = 2) => (fin(n) ? nf({ maximumFractionDigits: d, minimumFractionDigits: 0 }).format(n) + (en ? "%" : " %") : "—"),
+    usd: (n) => (fin(n) ? "US$" + (en ? "" : "\u00a0") + nf({ maximumFractionDigits: 2, minimumFractionDigits: 2 }).format(n) : "—"),
+    usd3: (n) => (fin(n) ? "US$" + (en ? "" : "\u00a0") + nf({ maximumFractionDigits: 4, minimumFractionDigits: 2 }).format(n) : "—"),
+    usdt6: (n) => (fin(n) ? nf({ maximumFractionDigits: 6, minimumFractionDigits: 6 }).format(n / 1e6) + " USD₮" : "—"),
+    level: (n) => (fin(n) ? nf({ maximumFractionDigits: 4 }).format(n) : "—"),
+    factor6: (n) => nf({ minimumFractionDigits: 6, maximumFractionDigits: 6 }).format(n),
+    month: (ym, year = true) => (isMonth(ym) ? dt({ month: "long", ...(year ? { year: "numeric" } : {}) }, new Date(ym + "-15T00:00:00Z")) : ""),
+    monthShort: (ym) => (isMonth(ym) ? dt({ month: "short", year: "numeric" }, new Date(ym + "-15T00:00:00Z")).replace(".", "") : ""),
+    dayMonth: (d) => (isDay(d) ? dt({ day: "numeric", month: "long" }, new Date(d.slice(0, 10) + "T12:00:00Z")) : ""),
+    dayFull: (d) => (isDay(d) ? dt({ day: "numeric", month: "long", year: "numeric" }, new Date(d.slice(0, 10) + "T12:00:00Z")) : "—"),
+  };
+}
+const ES = fmt("es");
+// Spanish formats, kept for other modules.
+export const ars = ES.ars;
+export const monthName = ES.month;
+export const dayMonth = ES.dayMonth;
+
+// The agent publishes its own labels in Spanish. Known ones are shown in English on English pages; anything else as is.
+const AGENT_EN = {
+  "prueba nuestra": "our test",
+  "Prueba: depto demo Swift Bot Labs": "Test: Swift Bot Labs demo flat",
+  "Prueba: contrato de febrero con IPC trimestral": "Test: February lease, IPC every quarter",
+  "Prueba: contrato de febrero con ICL": "Test: February lease with ICL",
+  "Prueba: contrato leído de un PDF": "Test: lease read from a PDF",
+  "Prueba: fábrica nueva, piso de dos ventanas": "Test: new factory, two-window floor",
+  "Prueba abierta de 1.000 wARS": "Open test, 1,000 wARS",
+  "Lectura y revisión de contrato (modelo de Cencori, vía buy)": "Contract reading and review (Cencori model, via buy)",
+  "Navegador alquilado (prueba, vía buy)": "Rented browser (test, via buy)",
+  "sin conversión": "no conversion",
+};
+const agentText = (X, v, max) => {
+  const t = str(v, max);
+  return X.en && Object.hasOwn(AGENT_EN, t) ? AGENT_EN[t] : t;
+};
 
 /* ---------- data: the KV records the app's own API serves ---------- */
 // A short per-isolate memo so a burst of page views costs a few KV reads, not one per view. Tests set SSR_CACHE_MS=0.
@@ -125,16 +182,20 @@ export async function testRents(env) {
   return rows.filter(Boolean);
 }
 
-/* ---------- page parts (mirror web/app.js) ---------- */
-// `lang` is "es" (default) or "en" (only /probar has an English version); `refresh` reloads a page that is waiting on the
-// agent, for readers without JavaScript.
+/* ---------- page frame ---------- */
 const CHROME = {
-  es: { html: "es-AR", og: "es_AR", calc: "Calculadora", load: "Cargar contrato", by: "Al Día es un producto de Swift Bot Labs. No somos una inmobiliaria ni un banco, y este sitio no reemplaza tu contrato ni un asesoramiento legal o impositivo.", transp: "Transparencia", code: "Código abierto", idx: "Índices", and: "y", probar: "Probalo con 1.000 wARS" },
-  en: { html: "en", og: "en_US", calc: "Calculator", load: "Load a lease", by: "Al Día is a Swift Bot Labs product. We are not an estate agent or a bank, and this site does not replace your contract or legal or tax advice.", transp: "Transparency", code: "Open source", idx: "Indices", and: "and", probar: "Try it with 1,000 wARS" },
+  es: { html: "es-AR", og: "es_AR", calc: "Calculadora", probar: "Probar", other: "EN", otherName: "English", otherLang: "en",
+    by: "Al Día es un producto de Swift Bot Labs. No somos una inmobiliaria ni un banco, y este sitio no reemplaza tu contrato ni un asesoramiento legal o impositivo.",
+    transp: "Transparencia", load: "Cargar contrato", tryIt: "Probalo con 1.000 wARS", code: "Código abierto", idx: "Índices", and: "y" },
+  en: { html: "en", og: "en_US", calc: "Calculator", probar: "Try it", other: "ES", otherName: "Español", otherLang: "es",
+    by: "Al Día is a Swift Bot Labs product. We are not an estate agent or a bank, and this site does not replace your contract or legal or tax advice.",
+    transp: "Transparency", load: "Load a lease", tryIt: "Try it with 1,000 wARS", code: "Open source", idx: "Indices", and: "and" },
 };
-export function layout({ origin, path, title, description, ogTitle, body, noindex = false, ssr = true, lang = "es", refresh = 0 }) {
-  const canonical = origin + path + (lang === "en" ? "?lang=en" : "");
+// `refresh` reloads a page that is waiting on the agent, for readers without JavaScript.
+export function layout({ origin, path, search = "", title, description, ogTitle, body, noindex = false, ssr = true, lang = "es", refresh = 0 }) {
   const t = CHROME[lang] || CHROME.es;
+  const X = fmt(lang);
+  const canonical = origin + path + (lang === "en" ? "?lang=en" : "");
   return html`<!doctype html>
 <html lang="${t.html}">
 <head>
@@ -152,6 +213,8 @@ ${noindex ? html`<meta name="robots" content="noindex">
 <meta property="og:description" content="${description}">
 <meta property="og:url" content="${canonical}">
 <link rel="canonical" href="${canonical}">
+<link rel="alternate" hreflang="es" href="${origin + path}">
+<link rel="alternate" hreflang="en" href="${origin + path}?lang=en">
 <link rel="alternate" type="text/plain" href="/llms.txt" title="Al Día for language models">
 <link rel="icon" href="/logo.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -161,11 +224,11 @@ ${noindex ? html`<meta name="robots" content="noindex">
 </head>
 <body>
 <div id="app"${ssr ? html` data-ssr="${path}"` : ""}>
-<header class="top"><a class="brand" href="/" data-link="1"><img src="/logo.svg" alt="">Al Día</a><nav><a href="/calculadora" data-link="1">${t.calc}</a><a href="/nuevo" data-link="1">${t.load}</a></nav></header>
+<header class="top"><a class="brand" href="${X.u("/")}"><img src="/logo.svg" alt="">Al Día</a><nav><a href="${X.u("/probar")}">${t.probar}</a><a href="${X.u("/calculadora")}">${t.calc}</a><a class="lang" href="${toggleHref(path, search, lang)}" hreflang="${t.otherLang}" lang="${t.otherLang}" title="${t.otherName}">${t.other}</a></nav></header>
 <main class="wrap">
 ${body}
 </main>
-<footer><div class="wrap"><p>${t.by}</p><p><a href="/transparencia" data-link="1">${t.transp}</a> · <a href="/probar${lang === "en" ? "?lang=en" : ""}">${t.probar}</a> · <a href="${LINKS.repo}" rel="noopener">${t.code}</a> · ${t.idx}: <a href="${INDEC_PAGE}" rel="noopener">INDEC</a> ${t.and} <a href="${BCRA_PAGE}" rel="noopener">BCRA</a></p></div></footer>
+<footer><div class="wrap"><p>${t.by}</p><p><a href="${X.u("/transparencia")}">${t.transp}</a> · <a href="${X.u("/probar")}">${t.tryIt}</a> · <a href="${X.u("/nuevo")}">${t.load}</a> · <a href="${LINKS.repo}" rel="noopener">${t.code}</a> · ${t.idx}: <a href="${INDEC_PAGE}" rel="noopener">INDEC</a> ${t.and} <a href="${BCRA_PAGE}" rel="noopener">BCRA</a></p></div></footer>
 </div>
 <script src="/rent.js" defer></script>
 <script src="/app.js" defer></script>
@@ -174,42 +237,158 @@ ${body}
 `.s;
 }
 
-function explainRent(r) {
+/* ---------- shared parts ---------- */
+function missingText(X, m) {
+  const s = str(m, 40);
+  const mm = s.match(/^(IPC de|ICL del) (\d{4}-\d{2}(?:-\d{2})?)$/);
+  return X.en && mm ? `${mm[1].slice(0, 3)} for ${mm[2]}` : s;
+}
+export function explainRent(X, r) {
+  const { s } = X;
   if (!r || typeof r !== "object") return "";
-  if (r.missing) return html`<div class="note warn">Todavía no se publicó el ${str(r.missing, 40)}. El aumento se calcula apenas salga.</div>`;
-  if (r.adjustments === 0) return html`<p class="muted">Sin aumentos todavía: este es el monto inicial del contrato.</p>`;
-  const rows = [["Monto inicial", ars(r.baseRent)], ["Aumento acumulado", "+" + pctf(r.pct)]];
-  if (r.stepPct !== undefined) rows.push(["Último aumento", "+" + pctf(r.stepPct)]);
+  if (r.missing) return html`<div class="note warn">${s(`Todavía no se publicó el ${missingText(X, r.missing)}. El aumento se calcula apenas salga.`, `The ${missingText(X, r.missing)} is not published yet. The increase is worked out as soon as it is.`)}</div>`;
+  if (r.adjustments === 0) return html`<p class="muted">${s("Sin aumentos todavía: este es el monto inicial del contrato.", "No increase yet: this is the lease's starting rent.")}</p>`;
+  const rows = [[s("Monto inicial", "Starting rent"), X.ars(r.baseRent)], [s("Aumento acumulado", "Total increase"), "+" + X.pctf(r.pct)]];
+  if (r.stepPct !== undefined) rows.push([s("Último aumento", "Latest increase"), "+" + X.pctf(r.stepPct)]);
   const used = Array.isArray(r.monthsUsed) ? r.monthsUsed.filter(isMonth) : [];
-  if (used.length) rows.push(["Meses de IPC usados", used.map((m) => monthName(m, false)).join(", ") + " " + used.at(-1).slice(0, 4)]);
-  const lv = (v) => (fin(v) ? String(v).replace(".", ",") : "—");
-  if (r.index === "ICL") rows.push(["ICL usado", `${lv(r.levelFrom)} → ${lv(r.levelTo)}`]);
+  if (used.length) rows.push([s("Meses de IPC usados", "IPC months used"), used.map((m) => X.month(m, false)).join(", ") + " " + used.at(-1).slice(0, 4)]);
+  const lv = (v) => (fin(v) ? (X.en ? String(v) : String(v).replace(".", ",")) : "—");
+  if (r.index === "ICL") rows.push([s("ICL usado", "ICL used"), `${lv(r.levelFrom)} → ${lv(r.levelTo)}`]);
   return html`<div><dl class="kv">${rows.map(([k, v]) => html`<dt>${k}</dt><dd>${v}</dd>`)}</dl>${
-    r.index === "IPC" ? html`<p class="small muted" style="margin-top:10px">Fuente: <a href="${INDEC_PAGE}" rel="noopener">INDEC, IPC nivel general nacional</a>.</p>` : ""}${
-    r.index === "ICL" ? html`<p class="small muted" style="margin-top:10px">Fuente: <a href="${BCRA_PAGE}" rel="noopener">BCRA, Índice para Contratos de Locación</a>.</p>` : ""}</div>`;
+    r.index === "IPC" ? html`<p class="small muted" style="margin-top:10px">${s("Fuente", "Source")}: <a href="${INDEC_PAGE}" rel="noopener">${s("INDEC, IPC nivel general nacional", "INDEC, national general CPI (IPC)")}</a>.</p>` : ""}${
+    r.index === "ICL" ? html`<p class="small muted" style="margin-top:10px">${s("Fuente", "Source")}: <a href="${BCRA_PAGE}" rel="noopener">${s("BCRA, Índice para Contratos de Locación", "BCRA, rental contracts index (ICL)")}</a>.</p>` : ""}</div>`;
 }
 
-const CHIPS = { pagado: ["ok", "Pagado"], parcial: ["wait", "Pago parcial"], pendiente: ["wait", "Pendiente"], vencido: ["late", "Vencido"], "sin-indice": ["info", "Esperando índice"] };
-const chipText = (st) => (CHIPS[st] || ["info", str(st, 20)])[1];
-const statusChip = (st) => html`<span class="chip ${(CHIPS[st] || ["info"])[0]}">${chipText(st)}</span>`;
-function clauseNote(c) {
+const CHIPS = {
+  pagado: ["ok", "Pagado", "Paid"], parcial: ["wait", "Pago parcial", "Part paid"], pendiente: ["wait", "Pendiente", "Due"],
+  vencido: ["late", "Vencido", "Overdue"], "sin-indice": ["info", "Esperando índice", "Waiting for the index"],
+};
+const chipText = (X, st) => (CHIPS[st] ? CHIPS[st][X.en ? 2 : 1] : str(st, 20));
+const statusChip = (X, st) => html`<span class="chip ${(CHIPS[st] || ["info"])[0]}">${chipText(X, st)}</span>`;
+function clauseNote(X, c) {
+  const { s } = X;
   const k = c && c.clauseCheck;
   if (!k || typeof k !== "object") return "";
-  return html`<p class="small" style="margin:10px 0 0">${k.ok ? "Revisamos este aumento contra la cláusula del contrato: coincide." : "Ojo: este aumento podría no coincidir con la cláusula del contrato. "}${
-    k.ok ? "" : str(k.note, 400)}${isTx(k.tx) ? html` <a href="${txUrl(k.tx)}" rel="noopener">Ver la revisión paga en Celo</a>.` : ""}</p>`;
+  return html`<p class="small" style="margin:10px 0 0">${k.ok ? s("Revisamos este aumento contra la cláusula del contrato: coincide.", "We checked this increase against the contract clause: it matches.") : s("Ojo: este aumento podría no coincidir con la cláusula del contrato. ", "Careful: this increase may not match the contract clause. ")}${
+    k.ok ? "" : str(k.note, 400)}${isTx(k.tx) ? html` <a href="${txUrl(k.tx)}" rel="noopener">${s("Ver la revisión paga en Celo", "See the paid review on Celo")}</a>.` : ""}</p>`;
+}
+// What a receipt paid the landlord, in one phrase.
+function payoutPhrase(X, r) {
+  const { s } = X;
+  const peso = fin(r.pesoToLandlord) && r.pesoToLandlord > 0 ? X.ars(r.pesoToLandlord) : null;
+  const dollar = fin(r.dollarToLandlord) && r.dollarToLandlord > 0 ? `${X.usd(r.dollarToLandlord)}${r.route ? s(` vía ${agentText(X, r.route, 40)}`, ` via ${agentText(X, r.route, 40)}`) : ""}` : null;
+  if (peso && dollar) return s(`${peso} en pesos y ${dollar}`, `${peso} in pesos and ${dollar}`);
+  return peso ? s(`${peso} en pesos`, `${peso} in pesos`) : dollar || "—";
+}
+
+/* ---------- outside payers (checked by worker/outside.js) ---------- */
+export const REASONS = {
+  es: { ours: "billetera nuestra", "funded-by-us": "sus primeros fondos vinieron de una billetera nuestra", "new-wallet": "su primera operación en Celo es posterior al 6 de octubre de 2026",
+    unclear: "no se ve de dónde salieron sus primeros fondos", "no-history": "el explorador todavía no muestra su historial", indirect: "los wARS no salieron directo de la billetera que firmó",
+    partial: "pagó menos de la mitad del alquiler del mes", unchecked: "todavía no la pudimos revisar", invalid: "dirección inválida",
+    "ramp-amount": `lo que mandó Ripio no coincide, con un margen de ${RAMP_TOLERANCE_PCT} %, con el alquiler que pedía la página` },
+  en: { ours: "one of our wallets", "funded-by-us": "its first funds came from one of our wallets", "new-wallet": "its first Celo activity is after 6 Oct 2026",
+    unclear: "where its first funds came from is not visible", "no-history": "the explorer does not show its history yet", indirect: "the wARS did not come straight from the signing wallet",
+    partial: "it paid less than half of that month's rent", unchecked: "not checked yet", invalid: "invalid address",
+    "ramp-amount": `what Ripio delivered does not match, within ${RAMP_TOLERANCE_PCT}%, the rent the tenant page asked for` },
+};
+export const PAYER_LABEL = { es: "otro equipo de la hackatón", en: "fellow hackathon builder" };
+export const RAMP_LABEL = { es: "inquilino por transferencia bancaria (Ripio)", en: "tenant paying by bank transfer (Ripio)" };
+// The stored summary is our own record, but every value is checked again before it becomes text or a link.
+export function cleanOutside(o) {
+  const ok = o && typeof o === "object" ? o : {};
+  const payers = (Array.isArray(ok.payers) ? ok.payers : []).filter((p) => p && isAddr(p.address) && isTx(p.tx)).slice(0, 200).map((p) => ({
+    address: p.address, tx: p.tx, date: isDay(p.date) ? p.date.slice(0, 10) : null, firstSeen: isDay(p.firstSeen) ? p.firstSeen.slice(0, 10) : null,
+    receipt: isId(p.id) && isMonth(p.month) ? `/recibo/${p.id}/${p.month}` : null, payments: Number.isInteger(p.payments) && p.payments > 0 ? Math.min(p.payments, 1000) : 1,
+  }));
+  const ramp = (Array.isArray(ok.ramp) ? ok.ramp : []).filter((r) => r && isTx(r.tx) && typeof r.key === "string" && /^[0-9a-f]{12}$/.test(r.key)).slice(0, 200).map((r) => ({
+    tx: r.tx, key: r.key, date: isDay(r.date) ? r.date.slice(0, 10) : null, wars: Number.isInteger(r.wars) && r.wars >= 0 ? r.wars : null,
+    receipt: isId(r.id) && isMonth(r.month) ? `/recibo/${r.id}/${r.month}` : null,
+  }));
+  const notCounted = (Array.isArray(ok.notCounted) ? ok.notCounted : []).filter((r) => r && Object.hasOwn(REASONS.es, r.reason)).slice(0, 50).map((r) => ({
+    address: isAddr(r.address) ? r.address : null, reason: r.reason, tx: isTx(r.tx) ? r.tx : null, date: isDay(r.date) ? r.date.slice(0, 10) : null, ramp: r.via === "ripio",
+  }));
+  const rampPayers = new Set(ramp.map((r) => r.key)).size;
+  return {
+    count: payers.length + rampPayers, walletPayers: payers.length, rampPayers, rampPayments: ramp.length,
+    payments: payers.reduce((a, p) => a + p.payments, 0) + ramp.length, payers, ramp, notCounted,
+    checkedAt: isDay(ok.checkedAt) ? str(ok.checkedAt, 24) : null, complete: ok.complete === true,
+  };
+}
+function outsideCard(X, o) {
+  const { s, u } = X;
+  const rule = s(
+    `Un alquiler ya liquidado cuenta como pago externo de dos maneras, y este sitio lo revisa solo en el explorador público de Celo (Blockscout) antes de sumar a nadie. Desde una billetera: los wARS salieron directo de una billetera que no es nuestra, cuyos primeros fondos no vinieron de una billetera nuestra y que tiene actividad en Celo desde antes del 6 de octubre de 2026. Por transferencia bancaria vía Ripio: los wARS los mandó la billetera de Ripio y la firmó ella misma, lo que llegó coincide con el alquiler del mes (margen de ${RAMP_TOLERANCE_PCT} %) y el propietario no es una billetera nuestra ni recibió nunca nada de una billetera nuestra. Nosotros no tenemos cuenta en Ripio. Si algo no se puede comprobar, no cuenta.`,
+    `A settled rent counts as an outside payment in one of two ways, and this site checks it by itself on Celo's public explorer (Blockscout) before counting anyone. From a wallet: the wARS came straight from a wallet that is not ours, whose first funds did not come from one of our wallets, and whose first Celo activity is before 6 October 2026. By bank transfer through Ripio: Ripio's wallet sent and signed the wARS transfer, the amount matches the month's rent (within ${RAMP_TOLERANCE_PCT}%), and the landlord is not one of our wallets and never received anything from one. We have no Ripio account. If something cannot be proven, it does not count.`);
+  const label = X.en ? PAYER_LABEL.en : PAYER_LABEL.es;
+  return html`<section class="card" id="externos"><h3>${s("Pagadores externos", "Outside payers")}</h3><p class="small">${rule}</p>${
+    o.payers.length ? html`<h3 style="margin-top:14px">${s("Desde una billetera", "From a wallet")}</h3><table><tr><th>${s("Billetera", "Wallet")}</th><th>${s("Pagó el", "Paid on")}</th><th class="r">${s("En Celo", "On Celo")}</th></tr>${o.payers.map((p) => html`<tr><td><a href="${addrUrl(p.address)}" rel="noopener" class="mono">${short(p.address)}</a><br><span class="tiny">${label}${p.firstSeen ? s(` · en Celo desde ${X.month(p.firstSeen.slice(0, 7))}`, ` · on Celo since ${X.month(p.firstSeen.slice(0, 7))}`) : ""}</span></td><td>${X.dayFull(p.date)}</td><td class="r"><a href="${txUrl(p.tx)}" rel="noopener">${s("pago", "payment")}</a>${p.receipt ? html`<br><a href="${u(p.receipt)}">${s("recibo", "receipt")}</a>` : ""}</td></tr>`)}</table>` : ""}${
+    o.ramp.length ? html`<h3 style="margin-top:14px">${s("Por transferencia vía Ripio", "By bank transfer through Ripio")}</h3><table><tr><th>${s("Pago", "Payment")}</th><th>${s("Fecha", "Date")}</th><th class="r">${s("En Celo", "On Celo")}</th></tr>${o.ramp.map((r) => html`<tr><td>${r.wars === null ? "—" : `${X.num(r.wars)} wARS`}<br><span class="tiny">${X.en ? RAMP_LABEL.en : RAMP_LABEL.es}</span></td><td>${X.dayFull(r.date)}</td><td class="r"><a href="${txUrl(r.tx)}" rel="noopener">${s("pago", "payment")}</a>${r.receipt ? html`<br><a href="${u(r.receipt)}">${s("recibo", "receipt")}</a>` : ""}</td></tr>`)}</table>` : ""}${
+    !o.payers.length && !o.ramp.length ? html`<p class="small muted" style="margin:0">${s("Todavía ninguno.", "None yet.")} <a href="${u("/probar")}">${s("Probalo con un alquiler real de 1.000 wARS", "Try it with a real 1,000 wARS rent")}</a>${s(": vos sos el propietario, así que la plata te vuelve, menos el 0,3 %.", ": you are the landlord, so the money comes back to you, less 0.3%.")}</p>` : ""}${
+    o.notCounted.length ? html`<h3 style="margin-top:16px">${s("Pagos que no contamos", "Payments we did not count")}</h3><table>${o.notCounted.map((r) => html`<tr><td>${r.address ? html`<span class="mono">${short(r.address)}</span>` : r.ramp ? s("Transferencia vía Ripio", "Bank transfer through Ripio") : s("Billetera nuestra", "One of our wallets")}<br><span class="tiny">${(X.en ? REASONS.en : REASONS.es)[r.reason]}</span></td><td class="r">${r.tx ? html`<a href="${txUrl(r.tx)}" rel="noopener">${s("pago", "payment")}</a>` : "—"}</td></tr>`)}</table>` : ""}${
+    o.checkedAt ? html`<p class="tiny" style="margin:10px 0 0">${s("Revisado", "Checked")}: ${o.checkedAt.slice(0, 16).replace("T", " ")} UTC${o.complete ? "" : s(", la revisión sigue en curso", ", the check is still running")}.</p>` : html`<p class="tiny" style="margin:10px 0 0">${s("La revisión todavía no corrió: hasta entonces no contamos a nadie.", "The check has not run yet: until it does, nobody is counted.")}</p>`}</section>`;
 }
 
 /* ---------- pages ---------- */
-function pageHome() {
-  const body = html`<section class="hero"><h1>El alquiler que se actualiza y se cobra solo.</h1><p>Cargás el contrato una vez. Cada mes calculamos el monto con el índice oficial, tu inquilino paga por transferencia y vos cobrás en pesos, en dólares o en las dos cosas.</p><div class="row"><a class="btn" href="/nuevo" data-link="1">Cargar mi contrato</a><a class="btn ghost" href="/calculadora" data-link="1">Calcular un aumento</a></div></section>
-<section class="steps" aria-label="Cómo funciona"><div class="card"><span class="num">1</span><h3>Cargás el contrato</h3><p class="muted small">Monto, fecha de inicio, índice (IPC, ICL o un porcentaje fijo) y cada cuánto aumenta. Si lo tenés en PDF, lo leemos por vos.</p></div><div class="card"><span class="num">2</span><h3>Mandás un solo link</h3><p class="muted small">Tu inquilino ve cuánto paga este mes, por qué y de dónde sale el número. Paga por transferencia desde su banco, como siempre.</p></div><div class="card"><span class="num">3</span><h3>Cobrás como quieras</h3><p class="muted small">Apenas entra el pago, el agente lo concilia, te manda la parte en pesos, pasa a dólares lo que elegiste y deja el recibo listo.</p></div></section>
-<section class="card"><h2>Lo que deja de ser tu problema</h2><p>Buscar el IPC del trimestre, hacer la cuenta, mandar el mensaje, mirar el banco para ver si pagó, armar el recibo y correr a comprar dólares antes de que se devalúe. Todo eso lo hace el agente, todos los meses, y lo deja a la vista de las dos partes.</p><p class="muted small">El cálculo usa solo fuentes oficiales: INDEC para el IPC y el BCRA para el ICL. Si esas fuentes no coinciden entre sí, el agente no emite el aumento hasta que se aclare.</p></section>
-<section class="faq"><h2>Preguntas</h2><h3>¿Mi inquilino necesita saber de cripto?</h3><p class="muted">No. Paga por transferencia a través de Ripio, que convierte los pesos en wARS, un peso digital 1 a 1. La primera vez Ripio le pide validar su identidad.</p><h3>¿Quién tiene la plata?</h3><p class="muted">Cada contrato tiene su propia cuenta en la red Celo, un contrato inteligente que solo te puede pagar a vos. El agente puede repartir lo cobrado, pero no puede mandarlo a otro lado, y vos podés retirar todo o sacarlo del medio cuando quieras.</p><h3>¿Qué necesito para cobrar?</h3><p class="muted">Una billetera compatible con Celo, como MiniPay, Valora o MetaMask. Después podés pasar los pesos a tu banco con Ripio.</p><h3>¿Cuánto cuesta?</h3><p class="muted">0,3 % de cada alquiler cobrado. Se descuenta solo y lo ves en cada recibo. Calcular aumentos con la calculadora es gratis.</p><h3>¿Puedo usarlo con mi contrato actual?</h3><p class="muted">Sí, si las dos partes están de acuerdo. Al Día no cambia el contrato: aplica lo que dice. Revisá que el índice y los meses que usamos coincidan con tu cláusula.</p><h3>¿Qué pasa si el dólar se mueve fuerte?</h3><p class="muted">Cada conversión tiene un piso de precio que calcula el propio contrato. Si el mercado está por debajo, el agente no convierte y ese mes cobrás todo en pesos.</p><h3>¿Y si el pago entra incompleto?</h3><p class="muted">Queda en la cuenta del contrato y lo ves como pago parcial. El agente reparte cuando entra el resto, y vos podés retirarlo antes con tu billetera.</p><h3>¿Reemplaza la factura?</h3><p class="muted">No. El recibo de Al Día es un comprobante informativo. Lo que tengas que facturar o declarar lo seguís haciendo como siempre.</p><h3>¿Ya lo usa gente?</h3><p class="muted">Estamos arrancando. En <a href="/transparencia" data-link="1">Transparencia</a> publicamos cuántos contratos y pagos son reales y cuáles son pruebas nuestras.</p></section>`;
+// The home page leads with the product: what a tenant sees this month, a settled receipt, the 2-minute test and the video.
+// What is and is not real yet follows right after, in its own panel.
+async function pageHome(env, X, waitUntil) {
+  const { s, u } = X;
+  const [pub, rec, st0, o0] = await Promise.all([kv(env, `pub:${SAMPLE_TENANT}`), kv(env, `receipt:${SAMPLE_RECEIPT.id}:${SAMPLE_RECEIPT.month}`), kv(env, "stats"), outsideSummary(env, waitUntil)]);
+  const o = cleanOutside(o0);
+  const st = st0 || {};
+  const c = pub && pub.current && typeof pub.current === "object" && fin(pub.current.amount) && isMonth(pub.current.month) ? pub.current : null;
+  const d = c && c.detail && typeof c.detail === "object" ? c.detail : null;
+  // The one-line proof of the amount, shown only when the published levels give exactly the amount charged.
+  let calcLine = "";
+  if (d && d.index === "IPC" && d.adjustments > 0 && fin(d.levelFrom) && fin(d.levelTo) && d.levelFrom > 0 && Number.isInteger(d.baseRent) && isMonth(d.refFrom) && isMonth(d.refTo)) {
+    const f = d.levelTo / d.levelFrom;
+    if (Math.floor(d.baseRent * f + 0.5) === c.amount) {
+      calcLine = html`<p class="calcline"><span class="nw">${X.ars(d.baseRent)} × ${X.factor6(f)}</span> <span class="nw">= <b>${X.ars(c.amount)}</b></span></p><p class="tiny" style="margin:0 0 6px">${s(`IPC ${X.monthShort(d.refTo)} ÷ IPC ${X.monthShort(d.refFrom)}, del INDEC`, `IPC ${X.monthShort(d.refTo)} ÷ IPC ${X.monthShort(d.refFrom)}, from INDEC`)}</p>`;
+    }
+  }
+  const demo = c ? html`<div class="demo" id="demo"><div class="demo-top"><span class="tiny">${s("Lo que ve el inquilino", "What the tenant sees")}</span>${statusChip(X, c.status)}</div><div class="small muted" style="margin-top:6px">${s(`Alquiler de ${X.month(c.month, false)}`, `${X.month(c.month, false)} rent`)}</div><div class="amount">${X.ars(c.amount)}</div>${
+    isDay(c.dueDate) ? html`<p class="small" style="margin:0 0 4px">${s(`Vence el ${X.dayMonth(c.dueDate)}`, `Due ${X.dayMonth(c.dueDate)}`)}${fin(d && d.pct) ? s(` · +${X.pctf(d.pct)} por IPC`, ` · +${X.pctf(d.pct)} by IPC`) : ""}</p>` : ""}${calcLine}${
+    c.clauseCheck && c.clauseCheck.ok === true ? html`<p class="small" style="margin:0 0 6px">✓ ${s("Coincide con la cláusula (revisión paga en Celo)", "Matches the lease clause (paid check on Celo)")}</p>` : ""}<a class="small" href="${u(`/pagar/${SAMPLE_TENANT}`)}">${s("¿Por qué este monto?", "Why this amount?")} →</a></div>` : "";
+  const r = rec && fin(rec.received) && isDay(rec.paidAt) ? rec : null;
+  const receipt = r ? html`<a class="rcpt" href="${u(`/recibo/${SAMPLE_RECEIPT.id}/${SAMPLE_RECEIPT.month}`)}"><span class="chip ok">✓ ${s("Liquidado en Celo", "Settled on Celo")}</span> <span class="small">${s(
+    `Recibo: ${X.ars(r.received)} cobrados el ${X.dayMonth(r.paidAt)}${r.index === "ICL" || r.index === "IPC" ? ` (${r.index})` : ""}; el propietario recibió ${payoutPhrase(X, r)}.`,
+    `Receipt: ${X.ars(r.received)} collected on ${X.dayMonth(r.paidAt)}${r.index === "ICL" || r.index === "IPC" ? ` (${r.index})` : ""}; the landlord got ${payoutPhrase(X, r)}.`)}</span></a>` : "";
+  const sample = c || r ? html`<p class="tiny" style="margin:8px 0 0">${s("Contrato y recibo de prueba nuestros, con índices oficiales reales.", "Our own test lease and receipt, with the real official indices.")} <a href="#real">${s("Qué es real hoy", "What is real today")}</a></p>` : "";
+  const hero = html`<section class="hero home"><h1>${s("El alquiler que se actualiza y se cobra solo.", "Rent that updates and collects itself.")}</h1><p class="lead">${s(
+    "Para propietarios en Argentina: un agente en Celo calcula cada aumento con el índice oficial, cobra en pesos y deja el recibo.",
+    "For landlords in Argentina: an agent on Celo works out each increase from the official index, collects in pesos and issues the receipt.")}</p>${demo}${receipt}${sample}
+<a class="btn block cta" href="${u("/probar")}">${s("Probalo en 2 minutos", "Try it in 2 minutes")} →</a>
+<p class="small muted" style="margin:8px 0 0">${s("Pagás 1.000 wARS (unos US$ 0,60) a un contrato real en Celo y te vuelven 997 con su recibo.", "Pay 1,000 wARS (about US$0.60) into a real lease on Celo and get 997 back, with a receipt.")}</p>
+<p class="small proof"><a href="${LINKS.video}" rel="noopener">▶ ${s("Ver el video (1:34)", "Watch the video (1:34)")}</a> · ${s("Agente en Celo", "Agent on Celo")} <a href="${LINKS.erc8004}" rel="noopener">ERC-8004 ${s(`n.º ${ONCHAIN.agentId}`, `#${ONCHAIN.agentId}`)}</a> · ${s("cada pago con comprobante en la red", "every payment with an onchain receipt")}</p></section>`;
+  const steps = html`<section class="steps" aria-label="${s("Cómo funciona", "How it works")}"><div class="card"><span class="num">1</span><h3>${s("Cargás el contrato", "You load the lease")}</h3><p class="muted small">${s("Monto, fecha de inicio, índice (IPC, ICL o un porcentaje fijo) y cada cuánto aumenta. Si lo tenés en PDF, lo leemos por vos.", "Amount, start date, index (IPC, ICL or a fixed percentage) and how often it goes up. If it is a PDF, we read it for you.")}</p></div><div class="card"><span class="num">2</span><h3>${s("Mandás un solo link", "You send one link")}</h3><p class="muted small">${s("Tu inquilino ve cuánto paga este mes, por qué y de dónde sale el número. Paga por transferencia desde su banco, como siempre.", "Your tenant sees what this month's rent is, why, and where the number comes from, and pays by bank transfer as usual.")}</p></div><div class="card"><span class="num">3</span><h3>${s("Cobrás como quieras", "You get paid your way")}</h3><p class="muted small">${s("Apenas entra el pago, el agente lo concilia, te manda la parte en pesos, pasa a dólares lo que elegiste y deja el recibo listo.", "As soon as the money arrives, the agent reconciles it, sends you the peso share, converts the share you chose to dollars and issues the receipt.")}</p></div></section>`;
+  const n = (v) => (Number.isInteger(v) ? v : "—");
+  const rampDone = o.rampPayments > 0;
+  const real = html`<section class="card real" id="real"><h2>${s("Qué es real hoy", "What is real today")}</h2><ul>
+<li><b>${s("En la red principal de Celo, con wARS reales:", "On Celo mainnet, with real wARS:")}</b> ${s(`el agente (ERC-8004 n.º ${ONCHAIN.agentId}), sus contratos verificados y ${n(st.paymentsTest)} alquileres cobrados y liquidados, cada uno con su recibo y sus operaciones.`, `the agent (ERC-8004 #${ONCHAIN.agentId}), its verified contracts and ${n(st.paymentsTest)} rents collected and settled, each with its receipt and transactions.`)}</li>
+<li><b>${s("Esos alquileres son pruebas nuestras.", "Those rents are our own tests.")}</b> ${s(`Los pagamos nosotros para probar el ciclo completo (${n(st.leasesTest)} contratos de prueba). Todavía no hay un propietario ni un inquilino reales.`, `We paid them ourselves to run the full cycle (${n(st.leasesTest)} test leases). There is no real landlord or tenant yet.`)}</li>
+<li><b>${s(`Pagadores externos verificados: ${o.count}.`, `Verified outside payers: ${o.count}.`)}</b> ${s("Se cuentan solo después de un control automático en el explorador público de Celo.", "They are counted only after an automatic check on Celo's public explorer.")} <a href="${u("/transparencia#externos")}">${s("Ver la regla y la lista", "See the rule and the list")}</a>.</li>
+<li><b>${s("Pago por transferencia vía Ripio:", "Bank transfer through Ripio:")}</b> ${rampDone ? s(`${o.rampPayments} pago(s) verificados por este camino.`, `${o.rampPayments} verified payment(s) this way.`) : s("armado y conectado, pero ningún inquilino real lo completó todavía de punta a punta.", "built and wired in, but no real tenant has completed it end to end yet.")}</li>
+<li><b>MiniPay</b> ${s("probado con un simulador de billetera, todavía no dentro de MiniPay. El gas en dólares digitales está hecho y probado una vez, apagado en uso normal.", "tested with a wallet stub, not yet inside MiniPay. Gas paid in digital dollars is built and was tested once; it is off in normal running.")}</li>
+</ul><p class="small" style="margin:0"><a href="${u("/transparencia")}">${s("Todo, con su fuente, en Transparencia", "Everything, with its source, on the Transparency page")}</a></p></section>`;
+  const problem = html`<section class="card"><h2>${s("Lo que deja de ser tu problema", "What stops being your problem")}</h2><p>${s("Buscar el IPC del trimestre, hacer la cuenta, mandar el mensaje, mirar el banco para ver si pagó, armar el recibo y correr a comprar dólares antes de que se devalúe. Todo eso lo hace el agente, todos los meses, y lo deja a la vista de las dos partes.", "Looking up the quarter's IPC, doing the maths, sending the message, checking the bank to see whether the tenant paid, writing the receipt and rushing to buy dollars before the peso slides. The agent does all of that every month, in plain view of both sides.")}</p><p class="muted small">${s("El cálculo usa solo fuentes oficiales: INDEC para el IPC y el BCRA para el ICL. Si esas fuentes no coinciden entre sí, el agente no emite el aumento hasta que se aclare.", "Only official sources are used: INDEC for IPC and the central bank (BCRA) for ICL. If the sources disagree, the agent holds the increase until they match.")}</p><div class="row"><a class="btn ghost" href="${u("/nuevo")}">${s("Cargar mi contrato", "Load my lease")}</a><a class="btn ghost" href="${u("/calculadora")}">${s("Calcular un aumento", "Work out an increase")}</a></div></section>`;
+  const faq = [
+    [s("¿Mi inquilino necesita saber de cripto?", "Does my tenant need to know about crypto?"), s("No. Paga por transferencia a través de Ripio, que convierte los pesos en wARS, un peso digital 1 a 1. La primera vez Ripio le pide validar su identidad.", "No. They pay by bank transfer through Ripio, which turns the pesos into wARS, a digital peso worth one peso. The first time, Ripio asks them to verify their identity.")],
+    [s("¿Quién tiene la plata?", "Who holds the money?"), s("Cada contrato tiene su propia cuenta en la red Celo, un contrato inteligente que solo te puede pagar a vos. El agente puede repartir lo cobrado, pero no puede mandarlo a otro lado, y vos podés retirar todo o sacarlo del medio cuando quieras.", "Each lease has its own account on Celo, a smart contract that can only pay you. The agent can split what came in but cannot send it anywhere else, and you can withdraw everything or remove the agent at any time.")],
+    [s("¿Qué necesito para cobrar?", "What do I need to get paid?"), s("Una billetera compatible con Celo, como MiniPay, Valora o MetaMask. Después podés pasar los pesos a tu banco con Ripio.", "A wallet that works on Celo, such as MiniPay, Valora or MetaMask. You can move the pesos to your bank with Ripio afterwards.")],
+    [s("¿Cuánto cuesta?", "What does it cost?"), s("0,3 % de cada alquiler cobrado. Se descuenta solo y lo ves en cada recibo. Calcular aumentos con la calculadora es gratis.", "0.3% of each rent collected, taken automatically and shown on every receipt. The calculator is free.")],
+    [s("¿Puedo usarlo con mi contrato actual?", "Can I use it with my current lease?"), s("Sí, si las dos partes están de acuerdo. Al Día no cambia el contrato: aplica lo que dice. Revisá que el índice y los meses que usamos coincidan con tu cláusula.", "Yes, if both sides agree. Al Día does not change the lease, it applies what it says. Check that the index and the months we use match your clause.")],
+    [s("¿Qué pasa si el dólar se mueve fuerte?", "What if the dollar jumps?"), s("Cada conversión tiene un piso de precio que calcula el propio contrato. Si el mercado está por debajo, el agente no convierte y ese mes cobrás todo en pesos.", "Every conversion has a price floor computed by the lease contract itself. If the market is below it, the agent does not convert and you get everything in pesos that month.")],
+    [s("¿Y si el pago entra incompleto?", "What if the payment comes in short?"), s("Queda en la cuenta del contrato y lo ves como pago parcial. El agente reparte cuando entra el resto, y vos podés retirarlo antes con tu billetera.", "It stays in the lease account and shows as part paid. The agent splits it when the rest arrives, and you can withdraw it earlier with your wallet.")],
+    [s("¿Reemplaza la factura?", "Does it replace the invoice?"), s("No. El recibo de Al Día es un comprobante informativo. Lo que tengas que facturar o declarar lo seguís haciendo como siempre.", "No. Al Día's receipt is for information. Whatever you have to invoice or declare, you keep doing as usual.")],
+  ];
+  const faqHtml = html`<section class="faq"><h2>${s("Preguntas", "Questions")}</h2>${faq.map(([q, a]) => html`<h3>${q}</h3><p class="muted">${a}</p>`)}<h3>${s("¿Ya lo usa gente?", "Is anyone using it yet?")}</h3><p class="muted">${s("Estamos arrancando: mirá ", "We are just starting: see ")}<a href="#real">${s("qué es real hoy", "what is real today")}</a>${s(". En Transparencia publicamos cuántos contratos y pagos son reales y cuáles son pruebas nuestras.", ". The Transparency page shows how many leases and payments are real and which are our own tests.")}</p></section>`;
   return {
-    title: "Al Día · El alquiler que se actualiza y se cobra solo",
+    title: s("Al Día · El alquiler que se actualiza y se cobra solo", "Al Día · Rent that updates and collects itself"),
     ogTitle: "Al Día",
-    description: "Cargás el contrato una vez. Cada mes calculamos el monto con el índice oficial, tu inquilino paga por transferencia y vos cobrás en pesos o en dólares.",
-    body,
+    description: s("Para propietarios en Argentina: un agente en Celo calcula cada aumento con el índice oficial, cobra en pesos y deja el recibo. Probalo en 2 minutos con 1.000 wARS.",
+      "For landlords in Argentina: an agent on Celo works out each increase from the official index, collects in pesos and issues the receipt. Try it in 2 minutes with 1,000 wARS."),
+    body: html`${hero}${steps}${real}${problem}${faqHtml}`,
   };
 }
 
@@ -233,13 +412,16 @@ export function calcInput(q) {
     : null;
   return { raw, lease };
 }
+const indexNames = (X) => ({ IPC: "IPC (INDEC)", ICL: "ICL (BCRA)", FIJO: X.s("Porcentaje fijo", "Fixed percentage") });
+const periods = (X) => [[1, X.s("Todos los meses", "Every month")], [2, X.s("Cada 2 meses", "Every 2 months")], [3, X.s("Cada 3 meses", "Every 3 months")], [4, X.s("Cada 4 meses", "Every 4 months")], [6, X.s("Cada 6 meses", "Every 6 months")], [12, X.s("Cada 12 meses", "Every 12 months")]];
 
-function calcResult(lease, idx) {
+function calcResult(X, lease, idx) {
+  const { s, u } = X;
   const m = nowMonth();
   const r = rentForMonth(lease, m, idx);
-  if (!r) return html`<div class="note">El contrato todavía no empezó.</div>`;
+  if (!r) return html`<div class="note">${s("El contrato todavía no empezó.", "The lease has not started yet.")}</div>`;
   const next = addMonths(r.adjustmentMonth, lease.periodMonths);
-  return html`<div class="card"><div class="muted small">Alquiler de ${monthName(m)}</div>${r.missing ? "" : html`<div class="amount">${ars(r.amount)}</div>`}${explainRent(r)}<p class="muted small" style="margin-top:12px">Próximo aumento: ${monthName(next)}.</p><a class="btn block" href="/nuevo" data-link="1">Que se haga solo todos los meses</a></div>`;
+  return html`<div class="card" id="calc-result"><div class="muted small">${s(`Alquiler de ${X.month(m)}`, `Rent for ${X.month(m)}`)}</div>${r.missing ? "" : html`<div class="amount">${X.ars(r.amount)}</div>`}${explainRent(X, r)}<p class="muted small" style="margin-top:12px">${s("Próximo aumento", "Next increase")}: ${X.month(next)}.</p><a class="btn block" href="${u("/nuevo")}">${s("Que se haga solo todos los meses", "Have it done for you every month")}</a></div>`;
 }
 
 // One worked example: the sample tenant's IPC rent, recomputed here from the official series and compared with the amount
@@ -256,128 +438,108 @@ export function workedExample(pub, idx) {
   if (!fin(from) || !fin(to)) return null;
   return { terms, r, from, to, factor: to / from, agent: fin(pub.current.amount) ? pub.current.amount : null, label: str(pub.propertyLabel, 80) };
 }
-function exampleCard(ex) {
+function exampleCard(X, ex) {
+  const { s, u } = X;
   if (!ex) return "";
   const { terms, r, from, to, factor, agent, label } = ex;
-  const period = (PERIODS.find(([n]) => n === terms.periodMonths) || [0, ""])[1].toLowerCase();
-  return html`<section class="card" id="ejemplo"><h2>Ejemplo resuelto</h2><p class="small muted">El <a href="/pagar/${SAMPLE_TENANT}" data-link="1">contrato de prueba</a> «${label}», con los datos que publica el agente, recalculado acá con los índices oficiales.</p><dl class="kv"><dt>Alquiler inicial</dt><dd>${ars(terms.baseRent)}</dd><dt>Inicio del contrato</dt><dd>${monthName(terms.startDate.slice(0, 7))}</dd><dt>Índice</dt><dd>${INDEX_NAMES.IPC}, ${period}</dd><dt>Alquiler de</dt><dd>${monthName(r.month)}</dd></dl><p class="small" style="margin:12px 0 4px">IPC de ${monthName(r.refTo)}: ${level(to)}<br>IPC de ${monthName(r.refFrom)}: ${level(from)}</p><p class="small" style="margin:0 0 4px">${level(to)} ÷ ${level(from)} = ${factor6(factor)}</p><p class="small" style="margin:0">${ars(terms.baseRent)} × ${factor6(factor)} = <b>${ars(r.amount)}</b>, redondeado al peso.</p>${explainRent(r)}${
-    agent === null ? "" : html`<p class="small" style="margin:12px 0 0">${agent === r.amount ? html`El agente cobró ${ars(agent)} en ese contrato: coincide.` : html`El agente publicó ${ars(agent)} para ese mes.`}</p>`}</section>`;
+  const period = ((periods(X).find(([n]) => n === terms.periodMonths) || [0, ""])[1]).toLowerCase();
+  return html`<section class="card" id="ejemplo"><h2>${s("Ejemplo resuelto", "Worked example")}</h2><p class="small muted">${s("El ", "The ")}<a href="${u(`/pagar/${SAMPLE_TENANT}`)}">${s("contrato de prueba", "test lease")}</a> «${agentText(X, label, 80)}»${s(", con los datos que publica el agente, recalculado acá con los índices oficiales.", ", from the data the agent publishes, recomputed here from the official indices.")}</p><dl class="kv"><dt>${s("Alquiler inicial", "Starting rent")}</dt><dd>${X.ars(terms.baseRent)}</dd><dt>${s("Inicio del contrato", "Lease start")}</dt><dd>${X.month(terms.startDate.slice(0, 7))}</dd><dt>${s("Índice", "Index")}</dt><dd>${indexNames(X).IPC}, ${period}</dd><dt>${s("Alquiler de", "Rent for")}</dt><dd>${X.month(r.month)}</dd></dl><p class="small" style="margin:12px 0 4px">${s(`IPC de ${X.month(r.refTo)}`, `IPC ${X.month(r.refTo)}`)}: ${X.level(to)}<br>${s(`IPC de ${X.month(r.refFrom)}`, `IPC ${X.month(r.refFrom)}`)}: ${X.level(from)}</p><p class="small" style="margin:0 0 4px">${X.level(to)} ÷ ${X.level(from)} = ${X.factor6(factor)}</p><p class="small" style="margin:0">${X.ars(terms.baseRent)} × ${X.factor6(factor)} = <b>${X.ars(r.amount)}</b>${s(", redondeado al peso.", ", rounded to the peso.")}</p>${explainRent(X, r)}${
+    agent === null ? "" : html`<p class="small" style="margin:12px 0 0">${agent === r.amount ? s(`El agente cobró ${X.ars(agent)} en ese contrato: coincide.`, `The agent charged ${X.ars(agent)} on that lease: it matches.`) : s(`El agente publicó ${X.ars(agent)} para ese mes.`, `The agent published ${X.ars(agent)} for that month.`)}</p>`}</section>`;
 }
 
-async function pageCalc(env, url) {
+async function pageCalc(env, url, X) {
+  const { s } = X;
   const [idx, pub] = await Promise.all([kv(env, "indices"), kv(env, `pub:${SAMPLE_TENANT}`)]);
   const { raw, lease } = calcInput(url.searchParams);
   const indexOk = idx && idx.ipc && idx.icl && isMonth(idx.ipcLast);
   const opt = (list, cur) => list.map(([v, t]) => html`<option value="${v}"${String(v) === String(cur) ? html` selected` : ""}>${t}</option>`);
   const field = (label, control, hint) => html`<div><label>${label}${hint ? html`<span class="hint">${hint}</span>` : ""}${control}</label></div>`;
   const form = indexOk
-    ? html`<form class="card" id="calc" method="get" action="/calculadora">${
-      field("Alquiler inicial del contrato", html`<input name="alquiler" inputmode="numeric" placeholder="$ 500.000" autocomplete="off" value="${raw.alquiler}">`)}${
-      field("Fecha de inicio del contrato", html`<input name="inicio" type="date" value="${raw.inicio}">`)}${
-      field("¿Con qué índice aumenta?", html`<select name="indice">${opt(Object.entries(INDEX_NAMES), raw.indice)}</select>`)}${
-      field("¿Cada cuánto aumenta?", html`<select name="cada">${opt(PERIODS, raw.cada)}</select>`)}${
-      field("Meses de IPC", html`<select name="meses">${opt([[2, "El último publicado al inicio del mes (lo más común)"], [1, "Incluye el mes anterior al aumento"]], raw.meses)}</select>`, "Solo para IPC.")}${
-      field("Porcentaje de cada aumento", html`<input name="pct" inputmode="decimal" placeholder="10" value="${raw.pct}">`, "Solo si aumenta un porcentaje fijo.")}<button class="btn block" type="submit" style="margin-top:14px">Calcular</button><p class="tiny" style="margin:12px 0 0">IPC disponible hasta ${monthName(idx.ipcLast)}. Datos leídos de INDEC y BCRA el ${str(idx.retrievedAt, 10)}.</p></form>`
-    : html`<div class="card" id="calc"><div class="note err">No pudimos traer los índices. Probá en un rato.</div></div>`;
+    ? html`<form class="card" id="calc" method="get" action="/calculadora">${X.en ? html`<input type="hidden" name="lang" value="en">` : ""}${
+      field(s("Alquiler inicial del contrato", "Starting rent in the lease"), html`<input name="alquiler" inputmode="numeric" placeholder="${s("$ 500.000", "ARS 500,000")}" autocomplete="off" value="${raw.alquiler}">`)}${
+      field(s("Fecha de inicio del contrato", "Lease start date"), html`<input name="inicio" type="date" value="${raw.inicio}">`)}${
+      field(s("¿Con qué índice aumenta?", "Which index raises it?"), html`<select name="indice">${opt(Object.entries(indexNames(X)), raw.indice)}</select>`)}${
+      field(s("¿Cada cuánto aumenta?", "How often does it go up?"), html`<select name="cada">${opt(periods(X), raw.cada)}</select>`)}${
+      field(s("Meses de IPC", "IPC months"), html`<select name="meses">${opt([[2, s("El último publicado al inicio del mes (lo más común)", "The latest published at the start of the month (most common)")], [1, s("Incluye el mes anterior al aumento", "Includes the month before the increase")]], raw.meses)}</select>`, s("Solo para IPC.", "IPC only."))}${
+      field(s("Porcentaje de cada aumento", "Percentage of each increase"), html`<input name="pct" inputmode="decimal" placeholder="10" value="${raw.pct}">`, s("Solo si aumenta un porcentaje fijo.", "Only for a fixed percentage."))}<button class="btn block" type="submit" style="margin-top:14px">${s("Calcular", "Calculate")}</button><p class="tiny" style="margin:12px 0 0">${s(`IPC disponible hasta ${X.month(idx.ipcLast)}. Datos leídos de INDEC y BCRA el ${str(idx.retrievedAt, 10)}.`, `IPC available up to ${X.month(idx.ipcLast)}. Data read from INDEC and BCRA on ${str(idx.retrievedAt, 10)}.`)}</p></form>`
+    : html`<div class="card" id="calc"><div class="note err">${s("No pudimos traer los índices. Probá en un rato.", "We could not load the indices. Please try again later.")}</div></div>`;
   const ex = indexOk ? workedExample(pub, idx) : null;
-  const body = html`<h1>Calculadora de aumento</h1><p class="muted">Gratis y con datos oficiales. No hace falta registrarse.</p>${form}${indexOk && lease ? calcResult(lease, idx) : ""}${exampleCard(ex)}`;
-  const exText = ex ? ` Ejemplo resuelto: ${ars(ex.terms.baseRent)} desde ${monthName(ex.terms.startDate.slice(0, 7))} con IPC cada ${ex.terms.periodMonths} meses da ${ars(ex.r.amount)} en ${monthName(ex.r.month)}.` : "";
+  const body = html`<h1>${s("Calculadora de aumento", "Rent increase calculator")}</h1><p class="muted">${s("Gratis y con datos oficiales. No hace falta registrarse.", "Free, official data, no sign-up.")}</p>${form}${indexOk && lease ? calcResult(X, lease, idx) : ""}${exampleCard(X, ex)}`;
+  const exText = ex ? s(` Ejemplo resuelto: ${X.ars(ex.terms.baseRent)} desde ${X.month(ex.terms.startDate.slice(0, 7))} con IPC cada ${ex.terms.periodMonths} meses da ${X.ars(ex.r.amount)} en ${X.month(ex.r.month)}.`,
+    ` Worked example: ${X.ars(ex.terms.baseRent)} from ${X.month(ex.terms.startDate.slice(0, 7))} with IPC every ${ex.terms.periodMonths} months gives ${X.ars(ex.r.amount)} in ${X.month(ex.r.month)}.`) : "";
   return {
-    title: "Calculadora de aumento de alquiler · Al Día",
-    description: `Calculá el aumento de un alquiler por IPC (INDEC), ICL (BCRA) o un porcentaje fijo, con los índices oficiales.${exText}`,
+    title: s("Calculadora de aumento de alquiler · Al Día", "Rent increase calculator · Al Día"),
+    description: s(`Calculá el aumento de un alquiler por IPC (INDEC), ICL (BCRA) o un porcentaje fijo, con los índices oficiales.${exText}`, `Work out an Argentine rent increase by IPC (INDEC), ICL (BCRA) or a fixed percentage, from the official indices.${exText}`),
     body,
   };
 }
 
-function rentsTable(rents) {
+function rentsTable(X, rents) {
+  const { s, u } = X;
   if (!rents.length) return "";
-  return html`<section class="card" id="pruebas"><h3>Alquileres de prueba cobrados</h3><p class="small muted">Los pagamos nosotros con wARS propios para probar el ciclo completo. Cada uno tiene su recibo y sus operaciones en la red Celo.</p><table><tr><th>Contrato</th><th class="r">Monto</th><th class="r">En Celo</th></tr>${rents.map((x) => html`<tr><td><a href="${x.receipt}" data-link="1">${x.label}</a><br><span class="tiny">${monthName(x.month)}${x.route ? html` · ${x.route}` : ""}</span></td><td class="r">${ars(x.amount)}</td><td class="r">${
-    x.paymentTxs.map((t, i) => html`<a href="${txUrl(t)}" rel="noopener">pago${x.paymentTxs.length > 1 ? " " + (i + 1) : ""}</a><br>`)}${x.settleTx ? html`<a href="${txUrl(x.settleTx)}" rel="noopener">liquidación</a><br>` : ""}${
-    x.lease ? html`<a href="${addrUrl(x.lease)}" rel="noopener">cuenta</a>` : ""}</td></tr>`)}</table></section>`;
+  return html`<section class="card" id="pruebas"><h3>${s("Alquileres de prueba cobrados", "Test rents collected")}</h3><p class="small muted">${s("Los pagamos nosotros con wARS propios para probar el ciclo completo. Cada uno tiene su recibo y sus operaciones en la red Celo.", "We paid these ourselves with our own wARS to run the full cycle. Each one has its receipt and its Celo transactions.")}</p><table><tr><th>${s("Contrato", "Lease")}</th><th class="r">${s("Monto", "Amount")}</th><th class="r">${s("En Celo", "On Celo")}</th></tr>${rents.map((x) => html`<tr><td><a href="${u(x.receipt)}">${agentText(X, x.label, 80)}</a><br><span class="tiny">${X.month(x.month)}${x.route ? html` · ${agentText(X, x.route, 40)}` : ""}</span></td><td class="r">${X.ars(x.amount)}</td><td class="r">${
+    x.paymentTxs.map((t, i) => html`<a href="${txUrl(t)}" rel="noopener">${s("pago", "payment")}${x.paymentTxs.length > 1 ? " " + (i + 1) : ""}</a><br>`)}${x.settleTx ? html`<a href="${txUrl(x.settleTx)}" rel="noopener">${s("liquidación", "settlement")}</a><br>` : ""}${
+    x.lease ? html`<a href="${addrUrl(x.lease)}" rel="noopener">${s("cuenta", "account")}</a>` : ""}</td></tr>`)}</table></section>`;
 }
 
-/* ---------- outside payers (checked by worker/outside.js) ---------- */
-export const REASONS = {
-  es: { ours: "billetera nuestra", "funded-by-us": "sus primeros fondos vinieron de una billetera nuestra", "new-wallet": "su primera operación en Celo es posterior al 6 de octubre de 2026",
-    unclear: "no se ve de dónde salieron sus primeros fondos", "no-history": "el explorador todavía no muestra su historial", indirect: "los wARS no salieron directo de la billetera que firmó",
-    partial: "pagó menos de la mitad del alquiler del mes", unchecked: "todavía no la pudimos revisar", invalid: "dirección inválida" },
-  en: { ours: "one of our wallets", "funded-by-us": "its first funds came from one of our wallets", "new-wallet": "its first Celo activity is after 6 Oct 2026",
-    unclear: "where its first funds came from is not visible", "no-history": "the explorer does not show its history yet", indirect: "the wARS did not come straight from the signing wallet",
-    partial: "it paid less than half of that month's rent", unchecked: "not checked yet", invalid: "invalid address" },
-};
-export const PAYER_LABEL = { es: "otro equipo de la hackatón", en: "fellow hackathon builder" };
-const isId = (i) => typeof i === "string" && /^[0-9a-f]{12}$/.test(i);
-const dayFull = (d) => (isDay(d) ? new Intl.DateTimeFormat("es-AR", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(d.slice(0, 10) + "T12:00:00Z")) : "—");
-// The stored summary is our own record, but every value is checked again before it becomes text or a link.
-export function cleanOutside(o) {
-  const ok = o && typeof o === "object" ? o : {};
-  const payers = (Array.isArray(ok.payers) ? ok.payers : []).filter((p) => p && isAddr(p.address) && isTx(p.tx)).slice(0, 200).map((p) => ({
-    address: p.address, tx: p.tx, date: isDay(p.date) ? p.date.slice(0, 10) : null, firstSeen: isDay(p.firstSeen) ? p.firstSeen.slice(0, 10) : null,
-    receipt: isId(p.id) && isMonth(p.month) ? `/recibo/${p.id}/${p.month}` : null, payments: Number.isInteger(p.payments) ? p.payments : 1,
-  }));
-  const notCounted = (Array.isArray(ok.notCounted) ? ok.notCounted : []).filter((r) => r && Object.hasOwn(REASONS.es, r.reason)).slice(0, 50).map((r) => ({
-    address: isAddr(r.address) ? r.address : null, reason: r.reason, tx: isTx(r.tx) ? r.tx : null, date: isDay(r.date) ? r.date.slice(0, 10) : null,
-  }));
-  return { count: payers.length, payments: payers.reduce((a, p) => a + p.payments, 0), payers, notCounted, checkedAt: isDay(ok.checkedAt) ? str(ok.checkedAt, 24) : null, complete: ok.complete === true };
-}
-function outsideCard(o) {
-  return html`<section class="card" id="externos"><h3>Pagadores externos</h3><p class="small">Cuenta un alquiler ya liquidado que pagó, directo desde su billetera, alguien que no somos nosotros: la billetera no es nuestra, sus primeros fondos no vinieron de una billetera nuestra y tiene actividad en Celo desde antes del 6 de octubre de 2026. Este sitio lo revisa solo en el explorador público de Celo (Blockscout). Si algo no se puede comprobar, no cuenta. Como no sabemos quién está detrás de cada billetera, figuran como «${PAYER_LABEL.es}».</p>${
-    o.payers.length ? html`<table><tr><th>Billetera</th><th>Pagó el</th><th class="r">En Celo</th></tr>${o.payers.map((p) => html`<tr><td><a href="${addrUrl(p.address)}" rel="noopener" class="mono">${short(p.address)}</a><br><span class="tiny">${PAYER_LABEL.es}${p.firstSeen ? html` · en Celo desde ${monthName(p.firstSeen.slice(0, 7))}` : ""}</span></td><td>${dayFull(p.date)}</td><td class="r"><a href="${txUrl(p.tx)}" rel="noopener">pago</a>${p.receipt ? html`<br><a href="${p.receipt}" data-link="1">recibo</a>` : ""}</td></tr>`)}</table>`
-      : html`<p class="small muted" style="margin:0">Todavía ninguno. <a href="/probar">Probalo con un alquiler real de 1.000 wARS</a>: vos sos el propietario, así que la plata te vuelve, menos el 0,3 %.</p>`}${
-    o.notCounted.length ? html`<h3 style="margin-top:16px">Pagos que no contamos</h3><table>${o.notCounted.map((r) => html`<tr><td>${r.address ? html`<span class="mono">${short(r.address)}</span>` : "Billetera nuestra"}<br><span class="tiny">${REASONS.es[r.reason]}</span></td><td class="r">${r.tx ? html`<a href="${txUrl(r.tx)}" rel="noopener">pago</a>` : "—"}</td></tr>`)}</table>` : ""}${
-    o.checkedAt ? html`<p class="tiny" style="margin:10px 0 0">Revisado: ${o.checkedAt.slice(0, 16).replace("T", " ")} UTC${o.complete ? "" : ", la revisión sigue en curso"}.</p>` : html`<p class="tiny" style="margin:10px 0 0">La revisión todavía no corrió: hasta entonces no contamos a nadie.</p>`}</section>`;
-}
-
-async function pageTransparency(env, waitUntil) {
-  const [s0, idx, rents, o0] = await Promise.all([kv(env, "stats"), kv(env, "indices"), testRents(env), outsideSummary(env, waitUntil)]);
+async function pageTransparency(env, X, waitUntil) {
+  const { s } = X;
+  const [s0, idx, rents, o0, health] = await Promise.all([kv(env, "stats"), kv(env, "indices"), testRents(env), outsideSummary(env, waitUntil), kv(env, "health")]);
   const o = cleanOutside(o0);
-  const s = s0 || {};
+  const st = s0 || {};
   const n = (v) => (Number.isInteger(v) ? v : "—");
   const ipcLastOk = idx && isMonth(idx.ipcLast) && idx.ipc && idx.ipcMonthlyPct;
-  const calls = s.paidCalls && Number.isInteger(s.paidCalls.count) ? s.paidCalls : null;
+  const calls = st.paidCalls && Number.isInteger(st.paidCalls.count) ? st.paidCalls : null;
   const recent = calls && Array.isArray(calls.recent) ? calls.recent.filter((c) => c && typeof c === "object").slice(0, 20) : [];
-  const leases = Array.isArray(s.leases) ? s.leases.filter((l) => l && typeof l === "object").slice(0, 12) : [];
-  const body = html`<h1>Transparencia</h1><p class="muted">Lo que se puede comprobar, con su fuente. Separamos lo nuestro de lo real.</p><section class="stats"><div class="stat"><b>${o.count}</b><span class="small muted">pagadores externos verificados</span></div><div class="stat"><b>${o.payments}</b><span class="small muted">pagos externos verificados</span></div><div class="stat"><b>${n(s.leasesTest)}</b><span class="small muted">contratos de prueba nuestros</span></div><div class="stat"><b>${n(s.paymentsTest)}</b><span class="small muted">pagos de prueba nuestros</span></div></section>
-<section class="card" style="margin-top:14px"><h3>De dónde salen estos números</h3><p class="small">${str(s.note, 600) || "Un pago cuenta como externo solo si pasa el control de abajo, que se hace solo con datos públicos de la red. Nuestras pruebas se cuentan aparte, como pruebas nuestras."}</p>${s.updatedAt ? html`<p class="tiny">Actualizado: ${str(s.updatedAt, 30)}</p>` : ""}</section>
-${outsideCard(o)}
-${ipcLastOk ? html`<section class="card"><h3>Índices oficiales</h3><dl class="kv"><dt>Último IPC</dt><dd>${monthName(idx.ipcLast)}: ${pctf(idx.ipcMonthlyPct[idx.ipcLast], 1)}</dd><dt>Nivel</dt><dd>${fin(idx.ipc[idx.ipcLast]) ? new Intl.NumberFormat("es-AR").format(idx.ipc[idx.ipcLast]) : "—"}</dd><dt>Controles</dt><dd>${idx.ok ? "Las fuentes coinciden" : "Hay una diferencia: el agente no emite aumentos"}</dd><dt>Leído el</dt><dd>${str(idx.retrievedAt, 16).replace("T", " ")} UTC</dd></dl><p class="small muted" style="margin-top:10px">IPC: archivo de INDEC, comparado contra la API de series del Ministerio de Economía y la variable 27 del BCRA. ICL: variable 40 del BCRA.</p></section>` : ""}
-<section class="card"><h3>En la red</h3><dl class="kv"><dt>Agente</dt><dd><a href="${LINKS.erc8004}" rel="noopener">ERC-8004 n.º ${ONCHAIN.agentId}</a></dd><dt>Billetera del agente</dt><dd><a href="${addrUrl(ONCHAIN.agentWallet)}" rel="noopener" class="mono">${short(ONCHAIN.agentWallet)}</a></dd><dt>Fábrica de cuentas</dt><dd><a href="${addrUrl(ONCHAIN.factory.toLowerCase())}" rel="noopener" class="mono">${short(ONCHAIN.factory.toLowerCase())}</a></dd></dl>${
-    leases.length ? html`<table style="margin-top:10px">${leases.map((l) => html`<tr><td>${str(l.label, 80)}</td><td class="r">${str(l.kind, 40)}</td></tr>`)}</table>` : ""}</section>
-${rentsTable(rents)}
-${calls ? html`<section class="card"><h3>Servicios que pagamos</h3><p class="small muted">${calls.count} llamadas pagas por x402 en Celo, por ${usd3(calls.usd)} en total, desde la billetera del agente.</p><table>${recent.map((c) => html`<tr><td>${str(c.service, 120)}</td><td class="r">${usd3(c.usd)}</td><td class="r">${isTx(c.tx) ? html`<a href="${txUrl(c.tx)}" rel="noopener">tx</a>` : "—"}</td></tr>`)}</table></section>` : ""}`;
-  const parts = [];
-  parts.push(`Pagadores externos verificados: ${o.count}. Pagos externos verificados: ${o.payments}. Pruebas nuestras: ${n(s.leasesTest)} contratos y ${n(s.paymentsTest)} pagos.`);
-  if (calls) parts.push(`${calls.count} llamadas pagas por x402.`);
+  const leases = Array.isArray(st.leases) ? st.leases.filter((l) => l && typeof l === "object").slice(0, 12) : [];
+  const at = health && isDay(health.at) ? str(health.at, 24).slice(0, 16).replace("T", " ") : null;
+  const fresh = [at ? s(`el agente dio su última vuelta a las ${at} UTC`, `the agent's last check ran at ${at} UTC`) : null,
+    o.checkedAt ? s(`la revisión de pagadores externos corrió a las ${o.checkedAt.slice(0, 16).replace("T", " ")} UTC`, `the outside-payer check ran at ${o.checkedAt.slice(0, 16).replace("T", " ")} UTC`) : null].filter(Boolean);
+  const tile = (v, label) => html`<div class="stat"><b>${v}</b><span class="small muted">${label}</span></div>`;
+  const body = html`<h1>${s("Transparencia", "Transparency")}</h1><p class="muted">${s("Lo que se puede comprobar, con su fuente. Separamos lo nuestro de lo real.", "What can be checked, with its source. Our own tests are kept apart from real use.")}</p>${
+    fresh.length ? html`<p class="tiny" id="fresh">${s("Al día: ", "Up to date: ")}${fresh.join(s("; ", "; "))}.</p>` : ""}<section class="stats">${
+    tile(n(st.paymentsTest), s("alquileres de prueba nuestros, cobrados en Celo", "test rents of ours, collected on Celo"))}${
+    tile(n(st.leasesTest), s("contratos de prueba nuestros", "test leases of ours"))}${
+    tile(o.count, s("pagadores externos verificados", "verified outside payers"))}${
+    tile(o.payments, s("pagos externos verificados", "verified outside payments"))}</section>
+<section class="card" style="margin-top:14px"><h3>${s("De dónde salen estos números", "Where these numbers come from")}</h3><p class="small">${s("Un pago cuenta como externo solo si pasa el control de abajo, que se hace solo con datos públicos de la red. Nuestras pruebas se cuentan aparte, como pruebas nuestras.", "A payment counts as outside only if it passes the check below, which uses public chain data alone. Our tests are counted separately, as ours.")}</p>${
+    st.updatedAt ? html`<p class="tiny" style="margin:0">${s("Los números del agente cambiaron por última vez el", "The agent's numbers last changed on")} ${str(st.updatedAt, 30)}.</p>` : ""}</section>
+${outsideCard(X, o)}
+${ipcLastOk ? html`<section class="card"><h3>${s("Índices oficiales", "Official indices")}</h3><dl class="kv"><dt>${s("Último IPC", "Latest IPC")}</dt><dd>${X.month(idx.ipcLast)}: ${X.pctf(idx.ipcMonthlyPct[idx.ipcLast], 1)}</dd><dt>${s("Nivel", "Level")}</dt><dd>${fin(idx.ipc[idx.ipcLast]) ? new Intl.NumberFormat(X.loc).format(idx.ipc[idx.ipcLast]) : "—"}</dd><dt>${s("Controles", "Checks")}</dt><dd>${idx.ok ? s("Las fuentes coinciden", "The sources agree") : s("Hay una diferencia: el agente no emite aumentos", "They disagree: the agent issues no increase")}</dd><dt>${s("Leído el", "Read on")}</dt><dd>${str(idx.retrievedAt, 16).replace("T", " ")} UTC</dd></dl><p class="small muted" style="margin-top:10px">${s("IPC: archivo de INDEC, comparado contra la API de series del Ministerio de Economía y la variable 27 del BCRA. ICL: variable 40 del BCRA.", "IPC: INDEC's file, checked against the Ministry of Economy series API and BCRA variable 27. ICL: BCRA variable 40.")}</p></section>` : ""}
+<section class="card"><h3>${s("En la red", "On chain")}</h3><dl class="kv"><dt>${s("Agente", "Agent")}</dt><dd><a href="${LINKS.erc8004}" rel="noopener">ERC-8004 ${s(`n.º ${ONCHAIN.agentId}`, `#${ONCHAIN.agentId}`)}</a></dd><dt>${s("Billetera del agente", "Agent wallet")}</dt><dd><a href="${addrUrl(ONCHAIN.agentWallet)}" rel="noopener" class="mono">${short(ONCHAIN.agentWallet)}</a></dd><dt>${s("Fábrica de cuentas", "Lease factory")}</dt><dd><a href="${addrUrl(ONCHAIN.factory.toLowerCase())}" rel="noopener" class="mono">${short(ONCHAIN.factory.toLowerCase())}</a></dd></dl>${
+    leases.length ? html`<table style="margin-top:10px">${leases.map((l) => html`<tr><td>${agentText(X, l.label, 80)}</td><td class="r">${agentText(X, l.kind, 40)}</td></tr>`)}</table>` : ""}</section>
+${rentsTable(X, rents)}
+${calls ? html`<section class="card"><h3>${s("Servicios que pagamos", "Services we paid for")}</h3><p class="small muted">${s(`${calls.count} llamadas pagas por x402 en Celo, por ${X.usd3(calls.usd)} en total, desde la billetera del agente.`, `${calls.count} paid x402 calls on Celo, ${X.usd3(calls.usd)} in total, from the agent wallet.`)}</p><table>${recent.map((c) => html`<tr><td>${agentText(X, c.service, 120)}</td><td class="r">${X.usd3(c.usd)}</td><td class="r">${isTx(c.tx) ? html`<a href="${txUrl(c.tx)}" rel="noopener">tx</a>` : "—"}</td></tr>`)}</table></section>` : ""}`;
+  const parts = [s(`Pagadores externos verificados: ${o.count}. Pagos externos verificados: ${o.payments}. Pruebas nuestras: ${n(st.leasesTest)} contratos y ${n(st.paymentsTest)} pagos.`,
+    `Verified outside payers: ${o.count}. Verified outside payments: ${o.payments}. Our tests: ${n(st.leasesTest)} leases and ${n(st.paymentsTest)} payments.`)];
+  if (calls) parts.push(s(`${calls.count} llamadas pagas por x402.`, `${calls.count} paid x402 calls.`));
   return {
-    title: "Transparencia · Al Día",
-    description: `${parts.join(" ")} Índices oficiales, agente ERC-8004 n.º ${ONCHAIN.agentId} y cada operación con su enlace a la red Celo.`.trim(),
+    title: s("Transparencia · Al Día", "Transparency · Al Día"),
+    description: `${parts.join(" ")} ${s(`Índices oficiales, agente ERC-8004 n.º ${ONCHAIN.agentId} y cada operación con su enlace a la red Celo.`, `Official indices, ERC-8004 agent #${ONCHAIN.agentId} and every transaction linked on Celo.`)}`.trim(),
     body,
   };
 }
 
-function testBanner(pub, probar) {
-  if (pub.builderTest) return html`<div class="note warn">Este es un contrato de prueba de Swift Bot Labs para mostrar el producto. No hay propietario ni inquilino reales.</div>`;
-  return probar ? html`<div class="note">Prueba abierta de Al Día: quien paga es también el propietario, así que los wARS vuelven a su billetera, menos el 0,3 %. <a href="/probar/${probar}">Ver los pasos</a>.</div>` : "";
-}
 // The id of an open-test lease (made on /probar), or null. Read from the Worker's own record, never from the agent's.
 export async function probarId(env, id) {
   const r = isId(id) ? await kv(env, `probar:${id}`) : null;
   return r && r.id === id ? id : null;
 }
 
-async function pagePay(env, id) {
+async function pagePay(env, id, X) {
+  const { s, u } = X;
   const [pub, probar] = await Promise.all([kv(env, `pub:${id}`), probarId(env, id)]);
   if (!pub) {
     if (await env.KV.get(`lease:${id}`)) {
-      return { title: "Pagar alquiler · Al Día", description: "Estamos preparando este alquiler.", noindex: true,
-        body: html`<h1>Estamos preparando este alquiler</h1><p class="muted">Tarda menos de dos minutos. Esta página se actualiza sola.</p>` };
+      return { title: s("Pagar alquiler · Al Día", "Pay rent · Al Día"), description: s("Estamos preparando este alquiler.", "We are setting up this rent."), noindex: true, refresh: 20,
+        body: html`<h1>${s("Estamos preparando este alquiler", "We are setting up this rent")}</h1><p class="muted">${s("Tarda menos de dos minutos. Esta página se actualiza sola.", "It takes less than two minutes. This page refreshes by itself.")}</p>` };
     }
-    return { status: 404, title: "No encontramos este alquiler · Al Día", description: "Revisá el link que te pasaron.", noindex: true,
-      body: html`<h1>No encontramos este alquiler</h1><p class="muted">Revisá el link que te pasaron.</p>` };
+    return { status: 404, title: s("No encontramos este alquiler · Al Día", "We could not find this rent · Al Día"), description: s("Revisá el link que te pasaron.", "Check the link you were sent."), noindex: true,
+      body: html`<h1>${s("No encontramos este alquiler", "We could not find this rent")}</h1><p class="muted">${s("Revisá el link que te pasaron.", "Check the link you were sent.")}</p>` };
   }
   const c = pub.current && typeof pub.current === "object" ? pub.current : null;
   const collector = isAddr(pub.collector) ? pub.collector : null;
-  const label = str(pub.propertyLabel, 80);
+  const label = agentText(X, pub.propertyLabel, 80);
   const amount = c && fin(c.amount) ? c.amount : null;
   const received = c && fin(c.received) ? c.received : 0;
   const open = c && c.status !== "pagado" && amount && !pub.closed;
@@ -385,86 +547,136 @@ async function pagePay(env, id) {
   const det = c && c.detail && typeof c.detail === "object" ? c.detail : null;
   const history = Array.isArray(pub.history) ? pub.history.filter((x) => x && isMonth(x.month)).slice(0, 60) : [];
   const paid = history.filter((x) => x.status === "pagado");
-  const body = html`${testBanner(pub, probar)}${pub.closed ? html`<div class="note warn">Este alquiler ya no se cobra por Al Día. Consultá con tu propietario antes de pagar.</div>` : ""}<h1>${c ? `Alquiler de ${monthName(c.month, false)}` : "Alquiler"}</h1><p class="muted">${label}</p>${
-    c ? html`<section class="card">${statusChip(c.status)}<div class="amount">${ars(open ? owed : amount)}</div>${open && isDay(c.dueDate) ? html`<p class="muted">Vence el ${dayMonth(c.dueDate)}.</p>` : ""}${
-      received && open ? html`<p class="small">Ya recibimos ${ars(received)} de ${ars(amount)}.</p>` : ""}<details${det && det.adjustments > 0 && det.adjustmentMonth === c.month ? html` open` : ""}><summary>¿Por qué este monto?</summary>${explainRent(det)}</details>${clauseNote(c)}${
-      isMonth(pub.nextAdjustment) ? html`<p class="small muted" style="margin:10px 0 0">Próximo aumento: ${monthName(pub.nextAdjustment)}.</p>` : ""}</section>` : ""}${
-    open && collector ? html`<section><a class="btn block" href="${`https://ramp.ripio.com/?country=AR&chain=42220&token=WARS&amount=${owed}&address=${collector}`}" rel="noopener">Pagar por transferencia</a><p class="small muted" style="margin-top:8px">Te lleva a Ripio. Pagás en pesos desde tu banco o billetera y el pago llega directo a la cuenta de este alquiler. La primera vez Ripio te pide validar tu identidad.</p><a class="btn ghost block" style="margin-top:10px" href="${`${BOT}?start=t_${id}`}" rel="noopener">Avisame por Telegram cuando venza</a></section>` : ""}${
-    paid.length ? html`<section class="card"><h3>Recibos</h3><table>${paid.map((x) => html`<tr><td>${monthName(x.month)}</td><td class="r">${ars(x.amount)}</td><td class="r"><a href="/recibo/${id}/${x.month}" data-link="1">Ver</a></td></tr>`)}</table></section>` : ""}${
-    collector ? html`<p class="tiny">Esta cuenta solo le puede pagar al propietario. <a href="${addrUrl(collector)}" rel="noopener">Ver la cuenta en Celo</a>.</p>` : ""}`;
-  const month = c ? monthName(c.month, false) : "";
+  // A builder-test lease shows how a tenant sees the rent, but it must never invite a real payment: no pay buttons.
+  const payBlock = !open || !collector ? "" : pub.builderTest === true
+    ? html`<section class="note" id="no-pay"><b>${s("Contrato de prueba de Swift Bot Labs: no pagues acá.", "Swift Bot Labs test lease: do not pay here.")}</b> ${s("Muestra cómo ve su alquiler un inquilino, con un cálculo real; no hay propietario ni inquilino reales. Para probar un pago de verdad, usá la prueba abierta: pagás 1.000 wARS y te vuelven a tu billetera.", "It shows how a tenant sees the rent, with real arithmetic; there is no real landlord or tenant. To try a real payment, use the open test: you pay 1,000 wARS and they come back to your wallet.")}<div style="margin-top:10px"><a class="btn block" href="${u("/probar")}">${s("Probalo con 1.000 wARS", "Try it with 1,000 wARS")}</a></div></section>`
+    : html`<section><a class="btn block" href="${rampUrl(owed, collector)}" rel="noopener">${s("Pagar por transferencia", "Pay by bank transfer")}</a><p class="small muted" style="margin-top:8px">${s("Te lleva a Ripio. Pagás en pesos desde tu banco o billetera y el pago llega directo a la cuenta de este alquiler. La primera vez Ripio te pide validar tu identidad.", "It takes you to Ripio. You pay in pesos from your bank or wallet and the payment goes straight to this rent's account. The first time, Ripio asks you to verify your identity.")}</p><div id="pay-wallet" data-id="${id}" data-collector="${collector}" data-owed="${owed}" data-lang="${X.lang}"></div><a class="btn ghost block" style="margin-top:10px" href="${`${BOT}?start=t_${id}`}" rel="noopener">${s("Avisame por Telegram cuando venza", "Remind me on Telegram when it is due")}</a></section>`;
+  const body = html`${probar && !pub.builderTest ? html`<div class="note">${s("Prueba abierta de Al Día: quien paga es también el propietario, así que los wARS vuelven a su billetera, menos el 0,3 %.", "Al Día open test: the payer is also the landlord, so the wARS go back to their wallet, less 0.3%.")} <a href="${u(`/probar/${probar}`)}">${s("Ver los pasos", "See the steps")}</a>.</div>` : ""}${
+    pub.closed ? html`<div class="note warn">${s("Este alquiler ya no se cobra por Al Día. Consultá con tu propietario antes de pagar.", "This rent is no longer collected through Al Día. Check with your landlord before paying.")}</div>` : ""}<h1>${c ? s(`Alquiler de ${X.month(c.month, false)}`, `${X.month(c.month, false)} rent`) : s("Alquiler", "Rent")}</h1><p class="muted">${label}</p>${
+    c ? html`<section class="card">${statusChip(X, c.status)}<div class="amount">${X.ars(open ? owed : amount)}</div>${open && isDay(c.dueDate) ? html`<p class="muted">${s(`Vence el ${X.dayMonth(c.dueDate)}.`, `Due ${X.dayMonth(c.dueDate)}.`)}</p>` : ""}${
+      received && open ? html`<p class="small">${s(`Ya recibimos ${X.ars(received)} de ${X.ars(amount)}.`, `We have received ${X.ars(received)} of ${X.ars(amount)}.`)}</p>` : ""}<details${det && det.adjustments > 0 && det.adjustmentMonth === c.month ? html` open` : ""}><summary>${s("¿Por qué este monto?", "Why this amount?")}</summary>${explainRent(X, det)}</details>${clauseNote(X, c)}${
+      isMonth(pub.nextAdjustment) ? html`<p class="small muted" style="margin:10px 0 0">${s("Próximo aumento", "Next increase")}: ${X.month(pub.nextAdjustment)}.</p>` : ""}</section>` : ""}${payBlock}${
+    pub.builderTest === true && !payBlock ? html`<div class="note">${s("Contrato de prueba de Swift Bot Labs: muestra cómo ve su alquiler un inquilino. No hay propietario ni inquilino reales.", "Swift Bot Labs test lease: it shows how a tenant sees the rent. There is no real landlord or tenant.")}</div>` : ""}${
+    paid.length ? html`<section class="card"><h3>${s("Recibos", "Receipts")}</h3><table>${paid.map((x) => html`<tr><td>${X.month(x.month)}</td><td class="r">${X.ars(x.amount)}</td><td class="r"><a href="${u(`/recibo/${id}/${x.month}`)}">${s("Ver", "View")}</a></td></tr>`)}</table></section>` : ""}${
+    collector ? html`<p class="tiny">${s("Esta cuenta solo le puede pagar al propietario.", "This account can only pay the landlord.")} <a href="${addrUrl(collector)}" rel="noopener">${s("Ver la cuenta en Celo", "See the account on Celo")}</a>.</p>` : ""}`;
+  const month = c ? X.month(c.month, false) : "";
   const descParts = [];
   if (c) {
-    descParts.push(`Alquiler de ${month}: ${ars(open ? owed : amount)}, ${chipText(c.status).toLowerCase()}${open && isDay(c.dueDate) ? `, vence el ${dayMonth(c.dueDate)}` : ""}.`);
-    if (det && det.adjustments > 0 && fin(det.pct)) descParts.push(`${det.index === "ICL" ? "ICL" : det.index === "IPC" ? "IPC" : "Aumento"}: +${pctf(det.pct)} desde el inicio, con el detalle del cálculo.`);
+    descParts.push(s(`Alquiler de ${month}: ${X.ars(open ? owed : amount)}, ${chipText(X, c.status).toLowerCase()}${open && isDay(c.dueDate) ? `, vence el ${X.dayMonth(c.dueDate)}` : ""}.`,
+      `${month} rent: ${X.ars(open ? owed : amount)}, ${chipText(X, c.status).toLowerCase()}${open && isDay(c.dueDate) ? `, due ${X.dayMonth(c.dueDate)}` : ""}.`));
+    if (det && det.adjustments > 0 && fin(det.pct)) descParts.push(s(`${det.index === "ICL" ? "ICL" : det.index === "IPC" ? "IPC" : "Aumento"}: +${X.pctf(det.pct)} desde el inicio, con el detalle del cálculo.`, `${det.index === "ICL" ? "ICL" : det.index === "IPC" ? "IPC" : "Increase"}: +${X.pctf(det.pct)} since the start, with the working shown.`));
   }
-  if (pub.builderTest) descParts.push("Contrato de prueba de Swift Bot Labs.");
+  if (pub.builderTest) descParts.push(s("Contrato de prueba de Swift Bot Labs.", "Swift Bot Labs test lease."));
   return {
-    title: `${c ? `Alquiler de ${month} · ` : ""}${label} · Al Día`,
-    description: descParts.join(" ") || "Cuánto pagás este mes, por qué y cómo pagar.",
+    title: `${c ? s(`Alquiler de ${month} · `, `${month} rent · `) : ""}${label} · Al Día`,
+    description: descParts.join(" ") || s("Cuánto pagás este mes, por qué y cómo pagar.", "What you pay this month, why, and how to pay."),
     body,
   };
 }
 
-async function pageReceipt(env, id, month) {
+// How the agent chose the venue for a receipt's dollar share, from the execution record it published. Mirrors
+// agent/lease_ops.py plan_route: venues more than 1% apart = no conversion; else Textile if its firm quote clears the floor
+// and beats Uniswap (or the builder test was set to exercise Textile); else Uniswap if it clears the floor.
+function decisionCard(X, r, id, month) {
+  const { s } = X;
+  const e = r.execution && typeof r.execution === "object" ? r.execution : null;
+  const n = (v) => (fin(v) && v >= 0 ? v : null);
+  const head = html`<h3>${s("Cómo decidió el agente", "How the agent decided")}</h3>`;
+  const json = html`<p class="tiny" style="margin:10px 0 0"><a href="/api/recibo/${id}/${month}">${s("Los mismos datos en JSON", "The same data as JSON")}</a></p>`;
+  if (!e) {
+    if (fin(r.dollarToLandlord) && r.dollarToLandlord > 0) return "";
+    return html`<section class="card" id="decision">${head}<p class="small" style="margin:0">${s("Este contrato cobra todo en pesos: no hubo conversión a dólares, así que no había que elegir dónde cambiar.", "This lease is paid out all in pesos: there was no dollar conversion, so no venue to choose.")}</p>${json}</section>`;
+  }
+  const floor = n(e.floor);
+  const uni = n(e.uniswap);
+  const prev = n(e.textilePreview);
+  const firm = e.textileFirm && typeof e.textileFirm === "object" ? e.textileFirm : null;
+  const firmAmt = firm && firm.ok === true ? n(firm.buyAmount) : null;
+  const route = str(r.route, 40);
+  let why;
+  if (e.skipped === "venues disagree") why = s("Uniswap y Textile FX diferían en más de 1 %: uno de los dos estaba mal o lo estaban empujando, así que el agente no convirtió y ese mes pagó todo en pesos.", "Uniswap and Textile FX were more than 1% apart, so one of them was wrong or being pushed: the agent did not convert and paid everything in pesos that month.");
+  else if (route === "Textile FX" && firmAmt !== null) {
+    why = uni !== null && firmAmt < uni
+      ? s("Uniswap ofrecía apenas más, pero en esta prueba nuestra el agente tenía que usar Textile FX para probar ese camino. El precio firme quedó por encima del piso.", "Uniswap offered slightly more, but this builder test was set to take Textile FX to exercise that path. The firm price was above the floor.")
+      : s("El precio firme de Textile FX era el mejor y estaba por encima del piso.", "Textile FX's firm price was the best one and above the floor.");
+  } else if (route === "Uniswap") {
+    if (firm && firm.ok !== true) why = s(`Textile FX no dio un precio firme («${str(firm.reason, 160)}»), así que el agente cambió en Uniswap, por encima del piso.`, `Textile FX gave no firm price ("${str(firm.reason, 160)}"), so the agent swapped on Uniswap, above the floor.`);
+    else why = s("Uniswap ofrecía más que Textile FX y estaba por encima del piso.", "Uniswap offered more than Textile FX and was above the floor.");
+  } else why = s("Ningún precio llegaba al piso, así que el agente no convirtió.", "No price reached the floor, so the agent did not convert.");
+  const rows = [[s("Piso que calcula el contrato", "Floor computed by the contract"), X.usdt6(floor)], ["Uniswap", X.usdt6(uni)], [s("Textile FX, indicativo", "Textile FX, indicative"), X.usdt6(prev)]];
+  if (firm) rows.push([s("Textile FX, firme", "Textile FX, firm"), firmAmt !== null ? X.usdt6(firmAmt) : s("sin precio", "no price")]);
+  rows.push([s("Elegido", "Chosen"), route ? agentText(X, route, 40) : "—"]);
+  return html`<section class="card" id="decision">${head}<p class="small muted" style="margin:0 0 6px">${s("Para la parte en dólares, por los wARS que se convirtieron:", "For the dollar share, for the wARS that were converted:")}</p><dl class="kv">${rows.map(([k, v]) => html`<dt>${k}</dt><dd>${v}</dd>`)}</dl><p class="small" style="margin:10px 0 0">${why}</p><p class="tiny" style="margin:8px 0 0">${s("El piso es el más alto de los promedios de Uniswap de 30 minutos y de 4 horas, menos el margen que fijó el propietario. Lo calcula el contrato del alquiler, así que el agente no lo puede bajar.", "The floor is the higher of Uniswap's 30-minute and 4-hour averages, less the landlord's slippage limit. The lease contract computes it, so the agent cannot lower it.")}</p>${json}</section>`;
+}
+
+async function pageReceipt(env, id, month, X) {
+  const { s, u } = X;
   const [r, probar] = await Promise.all([kv(env, `receipt:${id}:${month}`), probarId(env, id)]);
   if (!r) {
-    return { status: 404, title: "No hay recibo para ese mes · Al Día", description: "No hay recibo para ese mes.", noindex: true,
-      body: html`<h1>No hay recibo para ese mes</h1>` };
+    return { status: 404, title: s("No hay recibo para ese mes · Al Día", "No receipt for that month · Al Día"), description: s("No hay recibo para ese mes.", "There is no receipt for that month."), noindex: true,
+      body: html`<h1>${s("No hay recibo para ese mes", "No receipt for that month")}</h1>` };
   }
   const pays = [...(Array.isArray(r.paymentTxs) ? r.paymentTxs : []), ...(Array.isArray(r.paymentTxsLate) ? r.paymentTxsLate : [])].filter(isTx);
-  const label = str(r.propertyLabel, 80);
+  const label = agentText(X, r.propertyLabel, 80);
   const rate = fin(r.rate) ? r.rate : null;
-  const body = html`${r.builderTest ? html`<div class="note warn">Recibo de prueba de Swift Bot Labs. No hay propietario ni inquilino reales.</div>` : probar ? html`<div class="note">Recibo de una prueba abierta de Al Día: quien pagó es también el propietario. <a href="/probar/${probar}">Ver los pasos</a>.</div>` : ""}<section class="card"><h1>Recibo de ${monthName(month)}</h1><p class="muted">${label}</p><div class="amount">${ars(r.received)}</div><dl class="kv"><dt>Alquiler del mes</dt><dd>${ars(r.amount)}</dd><dt>Cobrado el</dt><dd>${dayMonth(r.paidAt)}</dd><dt>Comisión Al Día</dt><dd>${ars(r.fee)}</dd><dt>Al propietario en pesos</dt><dd>${ars(r.pesoToLandlord)}</dd><dt>Al propietario en dólares</dt><dd>${fin(r.dollarToLandlord) && r.dollarToLandlord ? usd(r.dollarToLandlord) : "—"}</dd>${
-    rate ? html`<dt>Tipo de cambio</dt><dd>${new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", minimumFractionDigits: 2 }).format(rate)} por USD₮</dd><dt>Convertido en</dt><dd>${str(r.route, 40)}</dd>` : ""}</dl><details open><summary>Cómo se calculó el monto</summary>${explainRent(r.detail)}</details><p class="small muted" style="margin-top:14px">Comprobantes en la red Celo: ${
-    pays.map((t, i) => html`<a href="${txUrl(t)}" rel="noopener">pago ${i + 1}</a>, `)}${isTx(r.settleTx) ? html`<a href="${txUrl(r.settleTx)}" rel="noopener">liquidación</a>` : ""}</p><p class="tiny">Huella del recibo: <span class="mono">${str(r.receiptHash, 80)}</span></p><p class="tiny">Comprobante informativo. No reemplaza la factura ni el recibo que corresponda según tu situación impositiva.</p></section>`;
-  const desc = [`Cobrado ${ars(r.received)}${isDay(r.paidAt) ? ` el ${dayMonth(r.paidAt)}` : ""}.`];
-  if (fin(r.pesoToLandlord)) desc.push(`Al propietario: ${ars(r.pesoToLandlord)}${fin(r.dollarToLandlord) && r.dollarToLandlord ? ` y ${usd(r.dollarToLandlord)}${r.route ? ` vía ${str(r.route, 40)}` : ""}` : ""}.`);
-  desc.push("Con las operaciones de pago y liquidación en la red Celo.");
-  if (r.builderTest) desc.push("Recibo de prueba.");
-  return { title: `Recibo de ${monthName(month)} · ${label} · Al Día`, description: desc.join(" "), body };
+  const body = html`${probar && !r.builderTest ? html`<div class="note">${s("Recibo de una prueba abierta de Al Día: quien pagó es también el propietario.", "Receipt of an Al Día open test: the payer is also the landlord.")} <a href="${u(`/probar/${probar}`)}">${s("Ver los pasos", "See the steps")}</a>.</div>` : ""}<section class="card"><h1>${s(`Recibo de ${X.month(month)}`, `Receipt for ${X.month(month)}`)}</h1><p class="muted">${label}</p><div class="amount">${X.ars(r.received)}</div><dl class="kv"><dt>${s("Alquiler del mes", "Rent for the month")}</dt><dd>${X.ars(r.amount)}</dd><dt>${s("Cobrado el", "Collected on")}</dt><dd>${X.dayMonth(r.paidAt)}</dd><dt>${s("Comisión Al Día", "Al Día fee")}</dt><dd>${X.ars(r.fee)}</dd><dt>${s("Al propietario en pesos", "To the landlord in pesos")}</dt><dd>${X.ars(r.pesoToLandlord)}</dd><dt>${s("Al propietario en dólares", "To the landlord in dollars")}</dt><dd>${fin(r.dollarToLandlord) && r.dollarToLandlord ? X.usd(r.dollarToLandlord) : "—"}</dd>${
+    rate ? html`<dt>${s("Tipo de cambio", "Exchange rate")}</dt><dd>${X.ars2(rate)} ${s("por USD₮", "per USD₮")}</dd><dt>${s("Convertido en", "Converted on")}</dt><dd>${agentText(X, r.route, 40)}</dd>` : ""}</dl><details open><summary>${s("Cómo se calculó el monto", "How the amount was worked out")}</summary>${explainRent(X, r.detail)}</details><p class="small muted" style="margin-top:14px">${s("Comprobantes en la red Celo", "Proof on Celo")}: ${
+    pays.map((t, i) => html`<a href="${txUrl(t)}" rel="noopener">${s("pago", "payment")} ${i + 1}</a>, `)}${isTx(r.settleTx) ? html`<a href="${txUrl(r.settleTx)}" rel="noopener">${s("liquidación", "settlement")}</a>` : ""}</p><p class="tiny">${s("Huella del recibo", "Receipt fingerprint")}: <span class="mono">${str(r.receiptHash, 80)}</span></p><p class="tiny">${s("Comprobante informativo. No reemplaza la factura ni el recibo que corresponda según tu situación impositiva.", "For information. It does not replace the invoice or receipt your tax situation requires.")}</p><button class="btn ghost noprint" type="button" id="print" hidden>${s("Imprimir o guardar en PDF", "Print or save as PDF")}</button></section>${
+    decisionCard(X, r, id, month)}${r.builderTest ? html`<div class="note">${s("Recibo de prueba de Swift Bot Labs: este alquiler lo pagamos nosotros para probar el ciclo completo. No hay propietario ni inquilino reales.", "Swift Bot Labs test receipt: we paid this rent ourselves to run the full cycle. There is no real landlord or tenant.")}</div>` : ""}`;
+  const desc = [s(`Cobrado ${X.ars(r.received)}${isDay(r.paidAt) ? ` el ${X.dayMonth(r.paidAt)}` : ""}.`, `Collected ${X.ars(r.received)}${isDay(r.paidAt) ? ` on ${X.dayMonth(r.paidAt)}` : ""}.`)];
+  if (fin(r.pesoToLandlord)) desc.push(s(`Al propietario: ${X.ars(r.pesoToLandlord)}${fin(r.dollarToLandlord) && r.dollarToLandlord ? ` y ${X.usd(r.dollarToLandlord)}${r.route ? ` vía ${str(r.route, 40)}` : ""}` : ""}.`,
+    `To the landlord: ${X.ars(r.pesoToLandlord)}${fin(r.dollarToLandlord) && r.dollarToLandlord ? ` and ${X.usd(r.dollarToLandlord)}${r.route ? ` via ${agentText(X, r.route, 40)}` : ""}` : ""}.`));
+  desc.push(s("Con las operaciones de pago y liquidación en la red Celo.", "With the payment and settlement transactions on Celo."));
+  if (r.builderTest) desc.push(s("Recibo de prueba.", "Test receipt."));
+  return { title: `${s(`Recibo de ${X.month(month)}`, `Receipt for ${X.month(month)}`)} · ${label} · Al Día`, description: desc.join(" "), body };
 }
 
-function pageNew() {
+function pageNew(X) {
+  const { s, u } = X;
   return {
-    title: "Cargar contrato · Al Día",
-    description: "Cargá tu contrato de alquiler en tres pasos: monto, índice y billetera. Si lo tenés en PDF, lo leemos en tu teléfono. Costo: 0,3 % de cada alquiler cobrado.",
-    body: html`<h1>Cargá tu contrato</h1><div class="card"><p>Son tres pasos: los datos del contrato (monto, fecha de inicio, índice y cada cuánto aumenta), un nombre para la propiedad y la billetera donde cobrás. Si tenés el contrato en PDF, lo leemos en tu teléfono y completamos los datos para que los revises.</p><p class="small muted">El agente crea la cuenta del contrato en la red Celo recién cuando entra el primer pago.</p></div><div class="note">Costo: 0,3 % de cada alquiler cobrado. Sin abono ni permanencia.</div><noscript><div class="note warn">Para cargar un contrato hace falta JavaScript. La <a href="/calculadora">calculadora</a> funciona sin él.</div></noscript>`,
+    title: s("Cargar contrato · Al Día", "Load a lease · Al Día"),
+    description: s("Cargá tu contrato de alquiler en tres pasos: monto, índice y billetera. Si lo tenés en PDF, lo leemos en tu teléfono. Costo: 0,3 % de cada alquiler cobrado.",
+      "Load your rental lease in three steps: amount, index and wallet. If it is a PDF, we read it on your phone. Cost: 0.3% of each rent collected."),
+    body: html`<h1>${s("Cargá tu contrato", "Load your lease")}</h1><div class="card"><p>${s("Son tres pasos: los datos del contrato (monto, fecha de inicio, índice y cada cuánto aumenta), un nombre para la propiedad y la billetera donde cobrás. Si tenés el contrato en PDF, lo leemos en tu teléfono y completamos los datos para que los revises.", "Three steps: the lease terms (amount, start date, index and how often it goes up), a name for the property and the wallet you get paid in. If you have the lease as a PDF, we read it on your phone and fill in the terms for you to check.")}</p><p class="small muted">${s("El agente crea la cuenta del contrato en la red Celo recién cuando entra el primer pago.", "The agent deploys the lease account on Celo only when the first payment arrives.")}</p></div><div class="note">${s("Costo: 0,3 % de cada alquiler cobrado. Sin abono ni permanencia.", "Cost: 0.3% of each rent collected. No subscription, no lock-in.")}</div><noscript><div class="note warn">${s("Para cargar un contrato hace falta JavaScript. La ", "Loading a lease needs JavaScript. The ")}<a href="${u("/calculadora")}">${s("calculadora", "calculator")}</a>${s(" funciona sin él.", " works without it.")}</div></noscript>`,
   };
 }
 
-function pagePanel() {
+function pagePanel(X) {
+  const { s } = X;
   return {
-    title: "Tu contrato · Al Día",
-    description: "Panel privado del propietario: el link para el inquilino, los avisos, cómo cobrás y el historial. Se abre solo con el link guardado.",
+    title: s("Tu contrato · Al Día", "Your lease · Al Día"),
+    description: s("Panel privado del propietario: el link para el inquilino, los avisos, cómo cobrás y el historial. Se abre solo con el link guardado.", "The landlord's private panel: the tenant link, reminders, how you get paid and the history. It opens only with the saved link."),
     noindex: true,
-    body: html`<h1>Tu contrato</h1><p class="muted">Este panel es privado: se abre con el link que guardaste cuando creaste el contrato.</p><noscript><div class="note warn">Para abrir el panel hace falta JavaScript: la clave de tu link privado se queda en tu teléfono y nunca llega a nuestro servidor.</div></noscript>`,
+    body: html`<h1>${s("Tu contrato", "Your lease")}</h1><p class="muted">${s("Este panel es privado: se abre con el link que guardaste cuando creaste el contrato.", "This panel is private: it opens with the link you saved when you created the lease.")}</p><noscript><div class="note warn">${s("Para abrir el panel hace falta JavaScript: la clave de tu link privado se queda en tu teléfono y nunca llega a nuestro servidor.", "The panel needs JavaScript: the key in your private link stays on your phone and never reaches our server.")}</div></noscript>`,
   };
 }
 
-function pageMissing() {
-  return { status: 404, title: "Esta página no existe · Al Día", description: "Esta página no existe.", noindex: true, ssr: false,
-    body: html`<h1>Esta página no existe</h1><p><a href="/" data-link="1">Volver al inicio</a></p>` };
+function pageMissing(X) {
+  const { s, u } = X;
+  return { status: 404, title: s("Esta página no existe · Al Día", "This page does not exist · Al Día"), description: s("Esta página no existe.", "This page does not exist."), noindex: true, ssr: false,
+    body: html`<h1>${s("Esta página no existe", "This page does not exist")}</h1><p><a href="${u("/")}">${s("Volver al inicio", "Back to the start")}</a></p>` };
 }
 
 // Returns { status, html } for a page path. Unknown paths get a real 404.
 export async function renderPage(url, env, waitUntil) {
   const path = url.pathname;
+  const lang = langOf(url);
+  const X = fmt(lang);
   let m;
   let page;
-  if (path === "/") page = pageHome();
-  else if (path === "/calculadora") page = await pageCalc(env, url);
-  else if (path === "/nuevo") page = pageNew();
-  else if (path === "/transparencia") page = await pageTransparency(env, waitUntil);
-  else if ((m = path.match(/^\/pagar\/([0-9a-f]{12})$/))) page = await pagePay(env, m[1]);
-  else if ((m = path.match(/^\/panel\/([0-9a-f]{12})$/))) page = pagePanel();
-  else if ((m = path.match(/^\/recibo\/([0-9a-f]{12})\/(\d{4}-(?:0[1-9]|1[0-2]))$/))) page = await pageReceipt(env, m[1], m[2]);
-  else page = pageMissing();
-  return { status: page.status || 200, html: layout({ origin: url.origin, path, ...page }) };
+  if (path === "/") page = await pageHome(env, X, waitUntil);
+  else if (path === "/calculadora") page = await pageCalc(env, url, X);
+  else if (path === "/nuevo") page = pageNew(X);
+  else if (path === "/transparencia") page = await pageTransparency(env, X, waitUntil);
+  else if ((m = path.match(/^\/pagar\/([0-9a-f]{12})$/))) page = await pagePay(env, m[1], X);
+  else if ((m = path.match(/^\/panel\/([0-9a-f]{12})$/))) page = pagePanel(X);
+  else if ((m = path.match(/^\/recibo\/([0-9a-f]{12})\/(\d{4}-(?:0[1-9]|1[0-2]))$/))) page = await pageReceipt(env, m[1], m[2], X);
+  else page = pageMissing(X);
+  return { status: page.status || 200, html: layout({ origin: url.origin, path, search: url.search, lang, ...page }) };
 }
 
 /* ---------- llms.txt ---------- */
-// Plain text for language models and for judges who read without a browser. English, with the Spanish page names.
+// Plain text for language models and for judges who read without a browser. English, with the page names.
 export async function renderLlms(url, env, waitUntil) {
   const o = url.origin;
   const [s0, idx, pub, rents, out0] = await Promise.all([kv(env, "stats"), kv(env, "indices"), kv(env, `pub:${SAMPLE_TENANT}`), testRents(env), outsideSummary(env, waitUntil)]);
@@ -476,35 +688,39 @@ export async function renderLlms(url, env, waitUntil) {
   const L = [];
   L.push("# Al Día", "");
   L.push("> Rent that updates and collects itself, in pesos, on Celo mainnet. A small landlord in Argentina loads a rental contract once. Every month the agent works out the rent from the official index (INDEC's IPC or the BCRA's ICL), the tenant pays in pesos, and the money lands as wARS in a contract made for that one lease, which can only pay the landlord. The agent reconciles the payment, converts the share the landlord chose into USD₮ at the better of Textile FX and Uniswap under a price floor the contract computes itself, and issues the receipt.", "");
-  L.push("By Swift Bot Labs. The site is in Argentine Spanish and built for a phone. Every public page listed below is server-rendered HTML, readable without JavaScript; JavaScript only adds interaction (live calculator, wallet payment, PDF reading).", "");
+  L.push("By Swift Bot Labs. The site is in Argentine Spanish by default and in English with ?lang=en on every page (toggle in the header), built for a phone. Every public page listed below is server-rendered HTML, readable without JavaScript; JavaScript only adds interaction (live calculator, wallet payment, PDF reading).", "");
   L.push("## Status, read live from the agent's published records");
-  L.push(`- Outside payers so far: ${out.count} (verified payments: ${out.payments}). Counted automatically, before listing, from Celo's public explorer (Blockscout): a settled rent paid straight from a wallet that is not ours, whose first funds did not come from one of our wallets, and whose first Celo activity is before ${CUTOFF_DAY}. Anything we cannot prove is not counted. We cannot tell who is behind a wallet, so each is listed as a "${PAYER_LABEL.en}".`);
+  L.push(`- Outside payers so far: ${out.count} (verified payments: ${out.payments}; from a wallet: ${out.walletPayers}; by bank transfer through Ripio: ${out.rampPayers}). Counted automatically, before listing, from Celo's public explorer (Blockscout).`);
+  L.push(`   - From a wallet: a settled rent paid straight from a wallet that is not ours, whose first funds did not come from one of our wallets, and whose first Celo activity is before ${CUTOFF_DAY}. We cannot tell who is behind a wallet, so each is listed as a "${PAYER_LABEL.en}".`);
+  L.push(`   - By bank transfer through Ripio's ramp (the tenant path): Ripio's delivery wallet sent and signed the wARS transfer into the lease, the amount is within ${RAMP_TOLERANCE_PCT}% of the charge the tenant page asked for, and the landlord is not one of our wallets and never received anything from one of our wallets up to that payment. We have no Ripio account. One payer per landlord.`);
+  L.push("   - Anything we cannot prove is not counted.");
   for (const p of out.payers) L.push(`   - ${short(p.address)}, paid ${p.date || "unknown"}, on Celo since ${p.firstSeen ? p.firstSeen.slice(0, 7) : "unknown"}: ${txUrl(p.tx)}${p.receipt ? ` , receipt ${o}${p.receipt}` : ""}`);
+  for (const r of out.ramp) L.push(`   - Bank transfer through Ripio, ${r.wars === null ? "unknown" : r.wars} wARS, ${r.date || "unknown"}: ${txUrl(r.tx)}${r.receipt ? ` , receipt ${o}${r.receipt}` : ""}`);
   if (out.notCounted.length) L.push(`- Payments not counted: ${out.notCounted.length} (${[...new Set(out.notCounted.map((r) => REASONS.en[r.reason]))].join("; ")}).`);
   L.push(`- Builder-test leases: ${n(s.leasesTest)}. Builder-test payments: ${n(s.paymentsTest)}. We funded these payments from our own wallet; they are labelled as tests on every page and never counted as outside payers.`);
-  if (s.updatedAt) L.push(`- Agent stats updated: ${str(s.updatedAt, 30)}.${out.checkedAt ? ` Outside payers checked: ${out.checkedAt.slice(0, 16).replace("T", " ")} UTC.` : ""}`);
-  L.push(`- Open test, anyone with a Celo wallet: ${o}/probar?lang=en . Pay a real 1,000 wARS rent (about US$0.60) with your own address as the landlord; the agent settles it and 997 wARS come back to you (0.3% fee).`, "");
+  if (s.updatedAt) L.push(`- Agent stats last changed: ${str(s.updatedAt, 30)}.${out.checkedAt ? ` Outside payers checked: ${out.checkedAt.slice(0, 16).replace("T", " ")} UTC.` : ""}`);
+  L.push(`- Open test, anyone with a Celo wallet: ${o}/probar?lang=en . Pay a real 1,000 wARS rent (about US$0.60) with your own address as the landlord, from a wallet or by bank transfer through Ripio; the agent settles it and 997 wARS come back to you (0.3% fee).`, "");
   L.push("## How to verify it on chain (Celo mainnet, chain id 42220)");
   L.push(`1. Agent identity: ERC-8004 agent ${ONCHAIN.agentId}, ${LINKS.erc8004} . Registered from the agent wallet as its first transaction: https://celoscan.io/tx/${ONCHAIN.identityTx}`);
   L.push(`2. Agent wallet: ${ONCHAIN.agentWallet}, ${addrUrl(ONCHAIN.agentWallet)} . Every transaction it sends carries the ERC-8021 attribution tag ${ONCHAIN.tag} at the end of its calldata.`);
   L.push(`3. Contracts, verified on Sourcify with an exact match: AlDiaFactory ${ONCHAIN.factory} (${addrUrl(ONCHAIN.factory)}) and the AlDiaLease implementation ${ONCHAIN.implementation} (${addrUrl(ONCHAIN.implementation)}). An earlier factory, ${ONCHAIN.oldFactory}, ran the first three test rents.`);
   L.push("4. What a lease contract cannot do, even with the agent's key: settle pays only the landlord plus a fee capped at 1%; a swap must return at least the higher of the Uniswap 30-minute and 4-hour TWAPs less the landlord's slippage limit; the landlord can withdraw everything or remove the agent at any time.");
   if (rents.length) {
-    L.push("5. Test rents settled on mainnet, from the receipts the agent published:");
+    L.push("5. Test rents settled on mainnet, from the receipts the agent published (each receipt page also shows how the agent chose the venue: floor, Uniswap quote, Textile quotes, the venue chosen and why):");
     for (const x of rents) {
       const usdPart = x.dollarToLandlord ? `, ${num(x.dollarToLandlord)} USD₮ to the landlord via ${x.route || "unknown"}` : "";
-      L.push(`   - ${x.label} (${x.month}): ${num(x.amount)} wARS received, fee ${num(x.fee)}, ${num(x.pesoToLandlord)} wARS to the landlord${usdPart}.`);
+      L.push(`   - ${agentText(fmt("en"), x.label, 80)} (${x.month}): ${num(x.amount)} wARS received, fee ${num(x.fee)}, ${num(x.pesoToLandlord)} wARS to the landlord${usdPart}.`);
       for (const t of x.paymentTxs) L.push(`     payment: ${txUrl(t)}`);
       if (x.settleTx) L.push(`     settlement: ${txUrl(x.settleTx)}`);
       if (x.lease) L.push(`     lease contract: ${addrUrl(x.lease)}`);
-      L.push(`     receipt page: ${o}${x.receipt}`);
+      L.push(`     receipt page: ${o}${x.receipt}?lang=en`);
     }
   }
   const calls = s.paidCalls && Number.isInteger(s.paidCalls.count) ? s.paidCalls : null;
   if (calls) {
     L.push(`6. Paid calls over x402 on Celo (through buy) from the agent wallet: ${calls.count} calls, ${num(calls.usd)} USD in total. Most recent:`);
     for (const c of (Array.isArray(calls.recent) ? calls.recent : []).slice(0, 20)) {
-      if (c && typeof c === "object") L.push(`   - ${str(c.service, 120)}: ${num(c.usd)} USD${isTx(c.tx) ? `, ${txUrl(c.tx)}` : ""}`);
+      if (c && typeof c === "object") L.push(`   - ${agentText(fmt("en"), c.service, 120)}: ${num(c.usd)} USD${isTx(c.tx) ? `, ${txUrl(c.tx)}` : ""}`);
     }
   }
   if (ex) {
@@ -514,16 +730,16 @@ export async function renderLlms(url, env, waitUntil) {
     L.push(`8. Official indices: latest IPC ${idx.ipcLast}, read ${str(idx.retrievedAt, 16)} UTC; sources ${idx.ok ? "agree" : "disagree, so the agent issues no new adjustment"}. IPC from INDEC, checked against the Ministry of Economy series API and BCRA variable 27; ICL from BCRA variable 40.`);
   }
   L.push("");
-  L.push("## Pages (server-rendered, Spanish)");
-  L.push(`- Transparency, proof page: ${o}/transparencia , verified outside payers (and payments not counted, with the reason), official indices, agent identity, test rents and paid calls with their transactions.`);
-  L.push(`- Open test: ${o}/probar (Spanish) and ${o}/probar?lang=en (English). Enter a Celo address, the site creates a 1,000 wARS test lease with that address as the landlord, you pay it, the agent settles it and you get the receipt. Works without JavaScript; with a wallet in the browser it pays with one tap.`);
-  L.push(`- Calculator: ${o}/calculadora , free, official data, with the worked example above. Works without JavaScript as a GET form, e.g. ${o}/calculadora?alquiler=500000&inicio=2026-03-01&indice=IPC&cada=4`);
-  L.push(`- Sample tenant page: ${o}/pagar/${SAMPLE_TENANT} , this month's rent, why it is that amount, how to pay. Rent raised by IPC, contract read from a PDF and the increase audited against its clause by a paid model call.`);
-  L.push(`- Sample receipt: ${o}/recibo/${SAMPLE_RECEIPT.id}/${SAMPLE_RECEIPT.month} , ICL rent settled through Textile FX, with payment and settlement transactions.`);
-  L.push(`- Home and FAQ: ${o}/`);
-  L.push(`- Create a lease: ${o}/nuevo (needs JavaScript; the agent deploys the lease contract only when the first payment arrives).`, "");
+  L.push("## Pages (server-rendered; add ?lang=en for English)");
+  L.push(`- Home: ${o}/?lang=en , what a tenant sees this month, a settled receipt, the 2-minute test, the video, and a "What is real today" panel.`);
+  L.push(`- Transparency, proof page: ${o}/transparencia?lang=en , verified outside payers (and payments not counted, with the reason), official indices, agent identity, test rents and paid calls with their transactions.`);
+  L.push(`- Open test: ${o}/probar?lang=en . Enter a Celo address, the site creates a 1,000 wARS test lease with that address as the landlord, you pay it (from a wallet, or by bank transfer through Ripio), the agent settles it and you get the receipt. Works without JavaScript; with a wallet in the browser it pays with one tap.`);
+  L.push(`- Calculator: ${o}/calculadora?lang=en , free, official data, with the worked example above. Works without JavaScript as a GET form, e.g. ${o}/calculadora?alquiler=500000&inicio=2026-03-01&indice=IPC&cada=4&lang=en`);
+  L.push(`- Sample tenant page: ${o}/pagar/${SAMPLE_TENANT}?lang=en , this month's rent, why it is that amount, how to pay. Rent raised by IPC, contract read from a PDF and the increase audited against its clause by a paid model call. A test lease, so it shows no pay button.`);
+  L.push(`- Sample receipt: ${o}/recibo/${SAMPLE_RECEIPT.id}/${SAMPLE_RECEIPT.month}?lang=en , ICL rent settled through Textile FX, with payment and settlement transactions and the agent's venue decision.`);
+  L.push(`- Create a lease: ${o}/nuevo?lang=en (needs JavaScript; the agent deploys the lease contract only when the first payment arrives).`, "");
   L.push("## Data (JSON, the same records the pages use)");
-  L.push(`- ${o}/api/stats , ${o}/api/indices , ${o}/api/pruebas`);
+  L.push(`- ${o}/api/stats , ${o}/api/indices , ${o}/api/pruebas , ${o}/api/externos`);
   L.push(`- ${o}/api/lease/<id> , ${o}/api/recibo/<id>/<YYYY-MM>`);
   L.push(`- ${o}/agent.json (ERC-8004 registration file)`, "");
   L.push("## Links");
@@ -531,7 +747,8 @@ export async function renderLlms(url, env, waitUntil) {
   L.push(`- Demo video (1:34): ${LINKS.video}`, "");
   L.push("## Known limits");
   L.push(out.count ? `- Outside payers so far come from the open test at /probar, where the payer is also the landlord; there is no independent tenant-landlord pair yet.` : "- No outside payer has passed the check yet, and there is no independent tenant or landlord yet.");
-  L.push("- The tenant path through Ripio's bank-transfer ramp is built but not completed end to end: it needs an Argentine account and Ripio's KYC. Our tests pay wARS directly.");
+  L.push(out.rampPayments ? `- ${out.rampPayments} payment(s) have arrived by bank transfer through Ripio's ramp.` : "- The tenant path through Ripio's bank-transfer ramp is built but not completed end to end: it needs an Argentine account and Ripio's KYC. Our tests pay wARS directly.");
+  L.push("- Ripio's ramp delivery wallet (0x0f776cc057622f0da2f257d2b987a7cf3386b7cc) was identified from public chain data, not confirmed by Ripio.");
   L.push("- MiniPay payment is tested with a wallet stub, not yet inside MiniPay. Stablecoin gas (CIP-64) is implemented and tested once, off in normal running.");
   L.push("- Al Día is not an estate agent or a bank and does not replace a contract or legal or tax advice.");
   return L.join("\n") + "\n";

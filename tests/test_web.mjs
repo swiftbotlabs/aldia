@@ -122,7 +122,7 @@ const tr = await page("/transparencia");
 plainPage(tr, "Transparencia · Al Día");
 const st = fx("stats");
 // The agent's raw "not our wallet" counts are not shown: only payers that passed the independence check (none here).
-for (const [n, label] of [[0, "pagadores externos verificados"], [0, "pagos externos verificados"], [st.leasesTest, "contratos de prueba nuestros"], [st.paymentsTest, "pagos de prueba nuestros"]]) {
+for (const [n, label] of [[st.paymentsTest, "alquileres de prueba nuestros, cobrados en Celo"], [st.leasesTest, "contratos de prueba nuestros"], [0, "pagadores externos verificados"], [0, "pagos externos verificados"]]) {
   assert.ok(tr.body.includes(`<b>${n}</b><span class="small muted">${label}</span>`), label);
 }
 assert.ok(tr.body.includes('href="https://8004scan.io/agents/celo/10014"') && tr.body.includes("celoscan.io/address/0xED120aeC2240A25125B3f32Eb8Bff9C5F688121b"));
@@ -138,6 +138,14 @@ assert.ok(textOf(tr.body).includes(`${st.paidCalls.count} llamadas pagas por x40
 assert.ok(textOf(tr.body).includes(`Último IPC ${new Intl.DateTimeFormat("es-AR", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(idxRecord.ipcLast + "-15T00:00:00Z"))}`));
 assert.match(meta(tr.body, "description"), /Pagadores externos verificados: 0\. Pagos externos verificados: 0\. Pruebas nuestras: 5 contratos y 4 pagos\./);
 assert.ok(tr.body.includes('id="externos"') && textOf(tr.body).includes("Todavía ninguno.") && tr.body.includes('href="/probar"'), "outside-payer section, honest zero, link to the open test");
+// The first number on the page is what was done (rents settled), not a zero; the zeros still follow, in the same row.
+const tiles = [...tr.body.matchAll(/<div class="stat"><b>([^<]*)<\/b>/g)].map((x) => x[1]);
+assert.deepStrictEqual(tiles, [String(st.paymentsTest), String(st.leasesTest), "0", "0"], "tile order");
+// One freshness line names each time for what it is (the agent's last check, the outside-payer check).
+kv.set("health", JSON.stringify({ at: "2026-11-04T14:32:14Z" }));
+const trFresh = textOf((await page("/transparencia")).body);
+assert.ok(trFresh.includes("el agente dio su última vuelta a las 2026-11-04 14:32 UTC"), "agent heartbeat time, labelled");
+assert.ok(!trFresh.includes("Actualizado:"), "no unlabelled 'updated' stamp next to a different time");
 
 // Sample tenant page: amount, status, due date, why, how to pay
 const tenant = fx("pub:c658d0b11729");
@@ -145,10 +153,18 @@ const pay = await page("/pagar/c658d0b11729");
 plainPage(pay, `Alquiler de noviembre · ${tenant.propertyLabel} · Al Día`);
 assert.ok(pay.body.includes(`<div class="amount">${ars(tenant.current.amount)}</div>`) && ars(tenant.current.amount) === `$${NB}660.978`);
 const payText = textOf(pay.body);
-for (const want of ["Pendiente", "Vence el 10 de noviembre.", "¿Por qué este monto?", "Aumento acumulado +20,18 %", "Último aumento +7,81 %", "Meses de IPC usados junio, julio, agosto, septiembre 2026", "Próximo aumento: marzo de 2027.", "coincide", "Este es un contrato de prueba"]) {
+for (const want of ["Pendiente", "Vence el 10 de noviembre.", "¿Por qué este monto?", "Aumento acumulado +20,18 %", "Último aumento +7,81 %", "Meses de IPC usados junio, julio, agosto, septiembre 2026", "Próximo aumento: marzo de 2027.", "coincide", "Contrato de prueba de Swift Bot Labs: no pagues acá."]) {
   assert.ok(payText.includes(want), "tenant page shows: " + want);
 }
-assert.ok(pay.body.includes(`href="https://ramp.ripio.com/?country=AR&amp;chain=42220&amp;token=WARS&amp;amount=660978&amp;address=${tenant.collector}"`));
+// A builder-test lease never offers a real payment: no Ripio link, no wallet button, a way to the open test instead.
+assert.ok(!pay.body.includes("ramp.ripio.com") && !pay.body.includes('id="pay-wallet"') && pay.body.includes('id="no-pay"') && pay.body.includes('href="/probar"'), "no pay button on a test lease");
+assert.ok(pay.body.indexOf('<div class="amount">') < pay.body.indexOf('id="no-pay"'), "the product comes first, the test notice after it");
+// positive control: the same lease, not a test, gets the Ripio link and the wallet placeholder
+kv.set("pub:c0ffeec0ffee", JSON.stringify({ ...tenant, id: "c0ffeec0ffee", builderTest: false }));
+const realPay = await page("/pagar/c0ffeec0ffee");
+assert.ok(realPay.body.includes(`href="https://ramp.ripio.com/?country=AR&amp;chain=42220&amp;token=WARS&amp;amount=660978&amp;address=${tenant.collector}"`) && realPay.body.includes(`id="pay-wallet" data-id="c0ffeec0ffee" data-collector="${tenant.collector}" data-owed="660978"`), "a real lease shows how to pay");
+assert.ok(!realPay.body.includes('id="no-pay"'));
+kv.delete("pub:c0ffeec0ffee");
 assert.ok(pay.body.includes(txLink(tenant.current.clauseCheck.tx)), "the paid clause audit is linked");
 assert.ok(pay.body.includes('data-ssr="/pagar/c658d0b11729"'));
 
@@ -161,7 +177,17 @@ for (const want of [`Alquiler del mes $ 1.859`, "Cobrado el 1 de noviembre", "Co
   assert.ok(rpText.replaceAll(NB, " ").includes(want), "receipt shows: " + want);
 }
 assert.ok(rp.body.includes(txLink(rec.settleTx)) && rp.body.includes(txLink(rec.paymentTxs[0])));
-assert.match(meta(rp.body, "description"), /Cobrado \$.1\.859 el 1 de noviembre\. Al propietario: \$.0 y US\$ 1,12 vía Textile FX\./);
+// How the agent chose the venue, from the execution record it published (this test was set to take Textile FX)
+for (const want of ["Cómo decidió el agente", "Piso que calcula el contrato 1,114951 USD₮", "Uniswap 1,125160 USD₮", "Textile FX, indicativo 1,124787 USD₮", "Textile FX, firme 1,124876 USD₮", "Elegido Textile FX", "Uniswap ofrecía apenas más, pero en esta prueba nuestra el agente tenía que usar Textile FX"]) {
+  assert.ok(rpText.includes(want), "decision shows: " + want);
+}
+assert.ok(rp.body.includes(`href="/api/recibo/8650326827d3/2026-11"`), "the decision links its JSON");
+assert.ok(rp.body.indexOf('id="decision"') < rp.body.indexOf("Recibo de prueba de Swift Bot Labs"), "the test notice comes after the receipt and the decision");
+const r2 = textOf((await page("/recibo/0b069750a07b/2026-11")).body);
+assert.ok(r2.includes("Textile FX no dio un precio firme («sellAmount is below the RFQ minimum") && r2.includes("Elegido Uniswap"), "a refused Textile quote is named");
+const r3 = textOf((await page("/recibo/3c9a8784b63e/2026-11")).body);
+assert.ok(r3.includes("Uniswap ofrecía más que Textile FX y estaba por encima del piso."), "a plain best-price choice");
+assert.match(meta(rp.body, "description"), /Cobrado \$.1\.859 el 1 de noviembre\. Al propietario: \$.0 y US\$.1,12 vía Textile FX\./);
 
 // Calculator: worked example recomputed with rent.js from the official series, equal to what the agent charged
 const calc = await page("/calculadora");
@@ -193,7 +219,8 @@ assert.ok(evil.body.includes('value="&quot;&gt;&lt;script&gt;alert(1)&lt;/"') &&
 assert.ok(!evil.body.includes('<div class="amount">'), "an impossible date gives no result");
 
 // Home, new lease and the private panel
-plainPage(await page("/"), "Al Día · El alquiler que se actualiza y se cobra solo");
+const homeP = await page("/");
+plainPage(homeP, "Al Día · El alquiler que se actualiza y se cobra solo");
 const nuevo = await page("/nuevo");
 plainPage(nuevo, "Cargar contrato · Al Día");
 const panel2 = await page(`/panel/${id}`);
@@ -229,7 +256,7 @@ assert.strictEqual(llms.status, 200);
 assert.match(llms.headers.get("content-type"), /^text\/plain; charset=utf-8/);
 const lt = await llms.text();
 assert.ok(lt.startsWith("# Al Día\n") && !/<html|<script|<div/i.test(lt));
-for (const want of [pages.ONCHAIN.agentWallet, pages.ONCHAIN.factory, pages.ONCHAIN.implementation, pages.ONCHAIN.identityTx, pages.ONCHAIN.tag, "https://x.test/transparencia", "https://x.test/pagar/c658d0b11729", "https://x.test/recibo/8650326827d3/2026-11", "https://x.test/calculadora", "Outside payers so far: 0 (verified payments: 0).", "https://x.test/probar?lang=en", "550000 x 1.201778 = 660978 pesos. The agent charged 660978 pesos on that lease (they match)."]) {
+for (const want of [pages.ONCHAIN.agentWallet, pages.ONCHAIN.factory, pages.ONCHAIN.implementation, pages.ONCHAIN.identityTx, pages.ONCHAIN.tag, "https://x.test/transparencia", "https://x.test/pagar/c658d0b11729", "https://x.test/recibo/8650326827d3/2026-11", "https://x.test/calculadora", "Outside payers so far: 0 (verified payments: 0; from a wallet: 0; by bank transfer through Ripio: 0).", "https://x.test/probar?lang=en", "550000 x 1.201778 = 660978 pesos. The agent charged 660978 pesos on that lease (they match)."]) {
   assert.ok(lt.includes(want), "llms.txt has " + want);
 }
 for (const id of ["3c9a8784b63e", "74414e7210ef", "8650326827d3", "0b069750a07b"]) {
@@ -249,4 +276,84 @@ for (const v of [pages.ONCHAIN.agentWallet, pages.ONCHAIN.identityTx, pages.ONCH
 }
 assert.ok(fs.readFileSync(path.join(here, "../web/app.js"), "utf8").includes(pages.LINKS.repo), "same repository link in both renderers");
 assert.ok(fs.readFileSync(path.join(here, "../web/app.js"), "utf8").includes(`SAMPLE_TENANT = "${pages.SAMPLE_TENANT}"`), "same worked example in both renderers");
+
+// ---------- Home: the product first (tenant card, settled receipt, the 2-minute test, the video), the disclosure after ----------
+const hb = homeP.body;
+const ht = textOf(hb).replaceAll(NB, " ");
+const at = (needle) => {
+  const i = hb.indexOf(needle);
+  assert.ok(i >= 0, "home has " + needle);
+  return i;
+};
+const realAt = at('id="real"');
+for (const needle of [`<div class="amount">${ars(tenant.current.amount)}</div>`, 'href="/recibo/8650326827d3/2026-11"', 'href="/probar"', `href="${pages.LINKS.video}"`, 'href="https://8004scan.io/agents/celo/10014"', 'href="/pagar/c658d0b11729"']) {
+  assert.ok(at(needle) < realAt, "before the disclosure panel: " + needle);
+}
+for (const want of ["$ 550.000 × 1,201778 = $ 660.978", "Vence el 10 de noviembre", "Recibo: $ 1.859 cobrados el 1 de noviembre (ICL); el propietario recibió US$ 1,12 vía Textile FX.", "Probalo en 2 minutos", "Ver el video (1:34)", "Agente en Celo ERC-8004 n.º 10014 · cada pago con comprobante en la red"]) {
+  assert.ok(ht.includes(want), "home shows: " + want);
+}
+// every true disclosure is still on the page, after the product
+for (const want of ["Contrato y recibo de prueba nuestros, con índices oficiales reales.", "Qué es real hoy", "Esos alquileres son pruebas nuestras.", "Todavía no hay un propietario ni un inquilino reales.", "Pagadores externos verificados: 0.", "ningún inquilino real lo completó todavía de punta a punta", "probado con un simulador de billetera"]) {
+  assert.ok(ht.includes(want), "home discloses: " + want);
+}
+assert.ok(!hb.includes('class="note warn"'), "no warning banner on the home page");
+// the one-line proof is shown only when the published levels give exactly the amount charged (positive control: tamper one level)
+kv.set(`pub:${pages.SAMPLE_TENANT}`, JSON.stringify({ ...tenant, current: { ...tenant.current, detail: { ...tenant.current.detail, levelTo: 99999 } } }));
+assert.ok(!textOf((await page("/")).body).includes("× 1,201778"), "a line that does not add up is not shown");
+kv.set(`pub:${pages.SAMPLE_TENANT}`, JSON.stringify(tenant));
+
+// ---------- English on every page: ?lang=en, server-rendered, every internal link keeps it ----------
+const EN_PAGES = [
+  ["/?lang=en", "Al Día · Rent that updates and collects itself", ["Rent that updates and collects itself.", "What the tenant sees", "ARS 660,978", "Due November 10", "ARS 550,000 × 1.201778 = ARS 660,978", "Try it in 2 minutes", "Watch the video (1:34)", "What is real today", "Those rents are our own tests.", "Settled on Celo"]],
+  ["/transparencia?lang=en", "Transparency · Al Día", ["verified outside payers", "Outside payers", "None yet.", "Official indices", "Test rents collected", "Services we paid for", "Contract reading and review (Cencori model, via buy)"]],
+  [`/pagar/${pages.SAMPLE_TENANT}?lang=en`, `November rent · Test: lease read from a PDF · Al Día`, ["Due", "Why this amount?", "Total increase +20.18%", "IPC months used June, July, August, September 2026", "Next increase: March 2027.", "We checked this increase against the contract clause: it matches.", "Swift Bot Labs test lease: do not pay here."]],
+  ["/recibo/8650326827d3/2026-11?lang=en", "Receipt for November 2026 · Test: February lease with ICL · Al Día", ["Rent for the month ARS 1,859", "Collected on November 1", "To the landlord in dollars US$1.12", "Converted on Textile FX", "ICL used 30.03 → 37.21", "How the agent decided", "Floor computed by the contract 1.114951 USD₮", "this builder test was set to take Textile FX"]],
+  ["/calculadora?lang=en", "Rent increase calculator · Al Día", ["Rent increase calculator", "Worked example", "ARS 550,000 × 1.201778 = ARS 660,978", "The agent charged ARS 660,978 on that lease: it matches.", "Calculate"]],
+  ["/nuevo?lang=en", "Load a lease · Al Día", ["Load your lease", "Cost: 0.3% of each rent collected."]],
+  [`/panel/${id}?lang=en`, "Your lease · Al Día", ["This panel is private"]],
+];
+const SPANISH = ["Alquiler de noviembre", "¿Por qué este monto?", "Transparencia ·", "Calculadora de aumento", "Cargá tu contrato", "Qué es real hoy", "Probalo en 2 minutos"];
+for (const [u, title, wants] of EN_PAGES) {
+  const p = await page(u);
+  plainPage(p, title);
+  assert.ok(p.body.includes('<html lang="en">'), u + " is English");
+  const t = textOf(p.body).replaceAll(NB, " ");
+  for (const w of wants) assert.ok(t.includes(w), `${u} shows: ${w}`);
+  for (const w of SPANISH) assert.ok(!t.includes(w), `${u} has no Spanish: ${w}`);
+  // every internal link keeps the language, except the toggle back to Spanish and the data/asset files
+  const internal = [...p.body.matchAll(/href="(\/[^"]*)"/g)].map((x) => x[1]).filter((h) => !/^\/(api\/|llms\.txt|logo\.svg|style\.css)/.test(h));
+  const toggle = (p.body.match(/<a class="lang" href="([^"]*)"/) || [])[1];
+  assert.ok(toggle && !toggle.includes("lang=en"), u + " has a toggle back to Spanish");
+  const lost = internal.filter((h) => h !== toggle && !/[?&]lang=en(#|&|$)/.test(h.replaceAll("&amp;", "&")));
+  assert.deepStrictEqual(lost, [], u + " links that drop the language");
+}
+// positive control for the link check: the Spanish pages carry no lang=en except the toggle
+for (const u of ["/", "/transparencia", `/pagar/${pages.SAMPLE_TENANT}`, "/recibo/8650326827d3/2026-11", "/calculadora"]) {
+  const b = (await page(u)).body;
+  const toggle = (b.match(/<a class="lang" href="([^"]*)"/) || [])[1];
+  assert.ok(toggle && toggle.includes("lang=en"), u + " has an English toggle");
+  assert.ok(b.includes('<html lang="es-AR">'));
+  assert.ok([...b.matchAll(/href="(\/[^"]*)"/g)].every((x) => x[1] === toggle || !x[1].includes("lang=en")), u + " Spanish links stay Spanish");
+}
+// the toggle keeps the calculator's inputs; the English form keeps the language
+const ce = (await page("/calculadora?alquiler=500000&inicio=2026-03-01&indice=IPC&cada=4&lang=en")).body;
+assert.ok(ce.includes('<a class="lang" href="/calculadora?alquiler=500000&amp;inicio=2026-03-01&amp;indice=IPC&amp;cada=4"') && ce.includes('<input type="hidden" name="lang" value="en">'));
+assert.ok(textOf(ce).replaceAll(NB, " ").includes("Next increase"), "an English calculation");
+// hostile or unknown language values fall back to Spanish and are never reflected raw
+for (const q of ["?lang=%3Cscript%3E", "?lang=EN", "?lang=fr", "?lang=en%22onx=1"]) {
+  const b = (await page("/" + q)).body;
+  assert.ok(b.includes('<html lang="es-AR">') && !b.includes("<script>") && !b.includes('"onx=1'), q);
+}
+// the toggle never lets a stored or typed value out of its attribute
+const tq = (await page('/calculadora?alquiler="><script>x</script>')).body;
+assert.ok(!tq.includes("<script>x") && tq.includes('<a class="lang" href="/calculadora?alquiler=%22%3E%3Cscript%3Ex%3C%2Fscript%3E&amp;lang=en"'), "toggle href is encoded and escaped");
+// tampered execution text in a receipt stays text
+kv.set("receipt:abcdefabcdef:2026-11", JSON.stringify({ propertyLabel: "x", received: 1000, amount: 1000, paidAt: "2026-11-01T00:00:00Z", route: "Uniswap", dollarToLandlord: 1, execution: { floor: "<b>", uniswap: 5, textileFirm: { ok: false, reason: "<script>alert(1)</script>" } }, paymentTxs: [], detail: null }));
+const tex = (await page("/recibo/abcdefabcdef/2026-11?lang=en")).body;
+assert.ok(!tex.includes("<script>alert") && tex.includes("&lt;script&gt;alert(1)&lt;/script&gt;") && !tex.includes("<b>"), "execution fields escaped");
+// app.js no longer redraws the pages the Worker renders, and it has no Spanish-only UI left for them
+const appJs = fs.readFileSync(path.join(here, "../web/app.js"), "utf8");
+assert.ok(!/function view(Home|Transparency|Pay|Receipt)\b/.test(appJs), "server-rendered pages are only enhanced");
+assert.ok(appJs.includes('document.documentElement.lang === "en"'), "the app follows the page's language");
+console.log("english ok");
 console.log("pages ok");

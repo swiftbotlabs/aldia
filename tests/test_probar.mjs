@@ -2,7 +2,7 @@
 // Positive and negative controls for every rule: ours, first funded by us, first seen after the cutoff, a real older
 // outside wallet, plus the fail-closed paths, the form limits and escaping of everything a stranger can type.
 import assert from "node:assert";
-import { checkWallet, blockscoutGetter, ourWallets, itemsOf, CUTOFF, PUBLIC_OURS, WARS } from "../worker/outside.js";
+import { checkWallet, blockscoutGetter, ourWallets, rampWallets, itemsOf, CUTOFF, PUBLIC_OURS, WARS, RAMP_WALLETS } from "../worker/outside.js";
 import { checksumOk, toChecksum } from "../worker/eip55.js";
 
 const { default: worker } = await import("../worker/worker.js");
@@ -246,6 +246,8 @@ assert.ok(!b.includes('http-equiv="refresh"'), "no automatic reload while the te
 assert.ok(strip(b).includes("1.000 wARS") && b.includes(`data-collector="${C}"`) && b.includes('data-owed="1000"') && b.includes(`data-landlord="${W.old}"`));
 assert.ok(b.includes(`href="/pagar/${id}"`) && b.includes(`https://celoscan.io/address/${C}`), "the existing tenant payment page and the lease account");
 assert.ok(b.includes("app.uniswap.org/swap?chain=celo"), "how to get wARS");
+assert.ok(b.includes(`href="https://ramp.ripio.com/?country=AR&amp;chain=42220&amp;token=WARS&amp;amount=1000&amp;address=${C}"`) && strip(b).includes("Pagar $ 1.000 por transferencia (Ripio)"), "the tenant's own path: a bank transfer through Ripio");
+assert.ok(strip(b).includes("Todavía nadie lo completó de punta a punta"), "honest: nobody has completed it yet");
 const pay = await text(await call(`/pagar/${id}`));
 assert.ok(strip(pay).includes("Prueba abierta de Al Día") && pay.includes(`href="/probar/${id}"`), "the tenant page says it is an open test");
 assert.strictEqual((await (await call(`/api/lease/${id}`)).json()).probar, true);
@@ -332,7 +334,114 @@ assert.ok(noScripts(tr));
 b = await text(await call("/probar"));
 assert.ok(strip(b).includes("1 pagador externo hasta ahora"));
 const llms = await text(await call("/llms.txt"));
-assert.ok(llms.includes("Outside payers so far: 1 (verified payments: 1)") && llms.includes(`https://celoscan.io/tx/${PAY}`) && llms.includes("fellow hackathon builder") && !llms.includes(EXTRA));
+assert.ok(llms.includes("Outside payers so far: 1 (verified payments: 1;") && llms.includes(`https://celoscan.io/tx/${PAY}`) && llms.includes("fellow hackathon builder") && !llms.includes(EXTRA));
+
+/* ---------- rents paid by bank transfer through Ripio's ramp ---------- */
+// The wARS arrive from Ripio's wallet, not the tenant's. Counted (as a separate line) only when Ripio itself sent and signed
+// the transfer, the lease's landlord is not ours and was never funded by us up to the payment, and the amount matches.
+const RIPIO = RAMP_WALLETS[0];
+assert.deepStrictEqual([...rampWallets({})], [RIPIO]);
+assert.deepStrictEqual([...rampWallets({ RAMP_SENDERS: "none" })], [], "the old rule, for the positive control below");
+const NEWRAMP = "0x3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e";
+assert.deepStrictEqual([...rampWallets({ RAMP_SENDERS: `${NEWRAMP.toUpperCase().replace("0X", "0x")}, junk ,0x12` })].sort(), [RIPIO, NEWRAMP].sort(), "another Ripio wallet can be added by setting; junk ignored");
+// Ripio's own wallet as the explorer shows it: old, first funded by a stranger. The old rule would count it as a payer.
+lists[RIPIO] = { txs: [T(50, T2025 + 60, RIPIO, USDT)], toks: [X(49, T2025, STRANGER, RIPIO, CELO, 1)] };
+const L = { fresh: "0x2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a", short: "0x2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b", relay: "0x2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c",
+  mixed: "0x2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d", after: "0x2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e" };
+lists[L.after] = { toks: [X(9999, Date.UTC(2026, 10, 6) / 1000, AGENT, L.after, USDT, 5000000)] }; // we sent it something only after its rent was paid
+const rampIds = [];
+async function rampSettled(lid, parts, { landlord = null, amount = 1000, builderTest = false } = {}) {
+  const col = "0x" + lid.padStart(40, "d");
+  const txs = parts.map((_, i) => tx(parseInt(lid, 16) * 16 + i));
+  collectors[col] = parts.map((p, i) => X(9300 + i, Date.UTC(2026, 10, 4, 15) / 1000, p.from, col, WARS, String(BigInt(p.wars) * 10n ** 18n), txs[i]));
+  parts.forEach((p, i) => (senders[txs[i]] = p.sender));
+  if (landlord) kv.set(`lease:${lid}`, JSON.stringify({ id: lid, payout: toChecksum(landlord), baseRent: amount, builderTest }));
+  kv.set(`pub:${lid}`, JSON.stringify({ id: lid, collector: col, builderTest, current: { month, status: "pagado", amount }, history: [{ month, amount, status: "pagado" }] }));
+  kv.set(`receipt:${lid}:${month}`, JSON.stringify({ amount, received: parts.reduce((a, p) => a + p.wars, 0), paymentTxs: txs, settleTx: tx(2), builderTest }));
+  rampIds.push(lid);
+  return txs;
+}
+const ramp = (wars, sender = RIPIO) => ({ from: RIPIO, sender, wars });
+const [rA] = await rampSettled("bbbbbbbbbb01", [ramp(1000)], { landlord: L.fresh });
+const [rB] = await rampSettled("bbbbbbbbbb02", [ramp(985)], { landlord: L.fresh }); // 1.5% short: Ripio can deliver slightly under
+const [rC] = await rampSettled("bbbbbbbbbb03", [ramp(950)], { landlord: L.short }); // 5% short: not the charge
+const [rD] = await rampSettled("bbbbbbbbbb04", [ramp(1000)], { landlord: EXTRA }); // the landlord is one of our wallets
+const [rE] = await rampSettled("bbbbbbbbbb05", [ramp(1000)], { landlord: W.fundedByUs }); // our agent wallet funded the landlord
+const [rF] = await rampSettled("bbbbbbbbbb06", [ramp(1000, STRANGER)], { landlord: L.relay }); // Ripio's wARS, moved by someone else
+const [rGw, rG] = await rampSettled("bbbbbbbbbb07", [{ from: W.fresh, sender: W.fresh, wars: 400 }, ramp(600)], { landlord: L.mixed }); // Ripio paid what was still owed
+const [rH] = await rampSettled("bbbbbbbbbb08", [ramp(1000)], {}); // no lease record: the landlord is unknown
+const [rI] = await rampSettled("bbbbbbbbbb09", [ramp(1000)], { landlord: L.fresh, builderTest: true }); // our builder test
+const [rJ] = await rampSettled("bbbbbbbbbb10", [ramp(1000)], { landlord: W.busy }); // too much history to read
+const [rK] = await rampSettled("bbbbbbbbbb11", [ramp(1000)], { landlord: L.after });
+// One through the open test itself: the tester is the landlord and pays by bank transfer
+const LP = "0x2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f";
+r = await form({ wallet: LP });
+const pid = r.headers.get("location").match(/\/probar\/([0-9a-f]{12})/)[1];
+const pcol = "0x" + pid.padStart(40, "e");
+const pt = tx(0xfeed01);
+collectors[pcol] = [X(9400, Date.UTC(2026, 10, 4, 16) / 1000, RIPIO, pcol, WARS, String(1000n * 10n ** 18n), pt)];
+senders[pt] = RIPIO;
+kv.set(`pub:${pid}`, JSON.stringify({ ...pub, id: pid, collector: pcol, current: { ...pub.current, status: "pagado", received: 1000 }, history: [{ month, amount: 1000, status: "pagado" }] }));
+kv.set(`receipt:${pid}:${month}`, JSON.stringify({ lease: pid, month, amount: 1000, received: 1000, paymentTxs: [pt], builderTest: false, propertyLabel: "Prueba abierta de 1.000 wARS", paidAt: "2026-11-04T16:05:00Z", settleTx: tx(0xfeed02), receiptHash: tx(0xfeed03), fee: 3, pesoToLandlord: 997, dollarToLandlord: 0, route: "sin conversión", rate: null, detail: pub.current.detail }));
+rampIds.push(pid);
+
+// Positive control: under the old rule (no ramp wallets) Ripio's own wallet is scored as one "fellow builder" payer.
+const old = await (await worker.fetch(new Request("https://x.test/api/externos"), { ...env, RAMP_SENDERS: "none" })).json();
+assert.ok(old.payers.some((p) => p.address === RIPIO), "old rule: Ripio's hot wallet counted as a wallet payer");
+assert.strictEqual(old.ramp.length, 0);
+// With the rule: Ripio is never a wallet payer; each ramp payment is judged on its own terms
+// Each summary has a budget of explorer calls; what is finished is cached, so the next runs go further (as on the site).
+// (The summary itself stays "in progress" here because of the broken-explorer wallet above, which is never cached.)
+const mine = [rA, rB, rC, rD, rE, rF, rGw, rG, rH, rJ, rK, pt];
+const settledAll = (o) => mine.every((t) => o.ramp.some((x) => x.tx === t) || o.notCounted.some((x) => x.tx === t && x.reason !== "unchecked"));
+let re;
+let runs = 0;
+do re = await (await call("/api/externos")).json();
+while (!settledAll(re) && ++runs < 8);
+assert.ok(settledAll(re), `the check converges over a few runs (${runs})`);
+assert.ok(!re.payers.some((p) => p.address === RIPIO) && !JSON.stringify([re.payers, re.ramp, re.notCounted]).includes(RIPIO.slice(2, 12)) && re.rule.ramp.wallets[0] === RIPIO, "Ripio's wallet is never listed as a payer");
+const rampTx = new Set(re.ramp.map((x) => x.tx));
+assert.deepStrictEqual([...rampTx].sort(), [rA, rB, rG, rK, pt].sort(), "counted ramp payments: " + JSON.stringify(re.ramp));
+assert.strictEqual(new Set(re.ramp.map((x) => x.key)).size, 4, "one payer per landlord: the two rents to one landlord count once");
+assert.strictEqual(re.count, 1 + 4, "outside payers = wallet payers + ramp payers");
+assert.strictEqual(re.payments, 1 + 5);
+const rwhy = Object.fromEntries(re.notCounted.map((x) => [x.tx, x]));
+assert.strictEqual(rwhy[rC].reason, "ramp-amount", "5% short of the charge");
+assert.strictEqual(rwhy[rD].reason, "ours", "a landlord of ours");
+assert.strictEqual(rwhy[rE].reason, "funded-by-us", "a landlord we funded");
+assert.strictEqual(rwhy[rF].reason, "indirect", "Ripio's tokens moved by another signer");
+assert.strictEqual(rwhy[rH].reason, "unclear", "no lease record, no landlord to check");
+assert.strictEqual(rwhy[rJ].reason, "unclear", "too much to read: not counted");
+assert.strictEqual(rwhy[rGw].reason, "partial", "the wallet part of a mixed month is judged by the wallet rule");
+assert.ok(!rwhy[rI] && !rampTx.has(rI), "our builder tests stay out of both lists");
+for (const t of [rC, rD, rE, rF, rH, rJ]) assert.strictEqual(rwhy[t].address, null, "no landlord or Ripio address is published");
+// the landlord check is cached once per landlord and payment block; a second summary asks nothing new about them
+before = calls.length;
+await call("/api/externos");
+assert.ok(calls.slice(before).every((c) => !Object.values(L).some((a) => c.includes(a)) && !c.includes(LP)), "landlord checks are cached");
+// the tester's own page and the transparency page
+b = strip(await text(await call(`/probar/${pid}`)));
+assert.ok(b.includes("Tu pago por transferencia vía Ripio cuenta como pago externo"), "the open test names the ramp verdict");
+const trr = await text(await call("/transparencia"));
+const trrt = strip(trr);
+assert.ok(trr.includes('<b>5</b><span class="small muted">pagadores externos verificados</span>') && trr.includes('<b>6</b><span class="small muted">pagos externos verificados</span>'));
+assert.ok(trrt.includes("Por transferencia vía Ripio") && trrt.includes("inquilino por transferencia bancaria (Ripio)") && trr.includes(`href="https://celoscan.io/tx/${rA}"`));
+assert.ok(trrt.includes("lo que mandó Ripio no coincide") && trrt.includes("Transferencia vía Ripio"));
+for (const a of [...Object.values(L), LP, RIPIO]) assert.ok(!trr.toLowerCase().includes(a.slice(2, 12)), "no landlord or ramp address on the page: " + a);
+const ren = strip(await text(await call("/transparencia?lang=en")));
+assert.ok(ren.includes("By bank transfer through Ripio") && ren.includes("tenant paying by bank transfer (Ripio)") && ren.includes("verified outside payers"));
+const rl = await text(await call("/llms.txt"));
+assert.ok(rl.includes("Outside payers so far: 5 (verified payments: 6; from a wallet: 1; by bank transfer through Ripio: 4).") && rl.includes(`Bank transfer through Ripio, 1000 wARS`) && rl.includes(`https://celoscan.io/tx/${rA}`));
+assert.ok(strip(await text(await call(`/probar/${pid}`))).includes("1.000 wARS") && !strip(await text(await call(`/probar/${id}`))).includes("Todavía nadie lo completó"), "once a ramp payment is verified, the 'nobody yet' line goes away");
+// a tampered ramp row cannot become markup or a link
+kv.set("outside:summary", JSON.stringify({ v: 2, checkedAt: new Date().toISOString(), complete: true, payers: [], notCounted: [], ramp: [{ tx: "javascript:x", key: "aaaaaaaaaaaa" }, { tx: PAY, key: "<b>" }, { tx: PAY, key: "bbbbbbbbbbbb", wars: "<i>", id: "<b>", month: "2026-11", date: "<script>" }] }));
+const tr2 = await text(await worker.fetch(new Request("https://x.test/transparencia"), { ...env, OUTSIDE_FRESH_MS: 3600e3 }));
+assert.ok(tr2.includes('<b>1</b><span class="small muted">pagadores externos verificados</span>') && !tr2.includes("javascript:") && !tr2.includes("<i>") && !tr2.includes('href="/recibo/<b>'), "only clean ramp rows count");
+// leave the rest of this file as it was
+for (const lid of rampIds) for (const k of [`pub:${lid}`, `receipt:${lid}:${month}`, `lease:${lid}`, `probar:${lid}`]) kv.delete(k);
+kv.delete("outside:summary");
+assert.strictEqual((await (await call("/api/externos")).json()).count, 1);
+console.log("ripio ramp ok");
 
 // Limits: three test leases a day per address (after each is paid), three per connection, 25 a day in all
 for (const n of [1, 2]) {
@@ -380,7 +489,7 @@ const second = await worker.fetch(new Request("https://x.test/transparencia"), {
 assert.ok((await second.text()).includes('<b>1</b><span class="small muted">pagadores externos verificados</span>'));
 // A slow explorer cannot hold the tester's page: after the time cap it says "still checking" and reloads itself.
 const slowEnv = { ...env, JUDGE_MS: 50, FETCH: async (u) => { await new Promise((r) => setTimeout(r, 400)); return fakeFetch(u); } };
-for (const k of [...kv.keys()]) if (k.startsWith("indep:") || k.startsWith("payrows:")) kv.delete(k);
+for (const k of [...kv.keys()]) if (k.startsWith("indep:") || k.startsWith("payrows")) kv.delete(k);
 const t0 = Date.now();
 const slow = await text(await worker.fetch(new Request(`https://x.test/probar/${id}`), slowEnv, { waitUntil: () => {} }));
 assert.ok(Date.now() - t0 < 1500, "the page answers within the cap");

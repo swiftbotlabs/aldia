@@ -42,18 +42,22 @@ Each lease is its own contract, [`AlDiaLease`](contracts/src/AlDiaLease.sol). Th
 
 ## Five-minute path for judges
 
-1. **Use it with no wallet.** Open the [calculator](https://aldia.swiftbotlab.workers.dev/calculadora), enter a rent and a start date, and read which months of IPC were used.
-2. **See what a tenant sees.** [A rent raised by IPC](https://aldia.swiftbotlab.workers.dev/pagar/c658d0b11729). This one was loaded from a PDF and audited against its clause.
-3. **See a receipt.** [ICL rent settled through Textile](https://aldia.swiftbotlab.workers.dev/recibo/8650326827d3/2026-11), with the payment and settlement transactions linked.
-4. **See who really used it.** The [transparency page](https://aldia.swiftbotlab.workers.dev/transparencia) separates our tests from real use.
-5. **Create a lease.** [Cargar contrato](https://aldia.swiftbotlab.workers.dev/nuevo) takes about a minute. The agent creates the on-chain account only when the first payment arrives, so an unused lease costs nothing.
-6. **Pay a real rent yourself.** [Probar](https://aldia.swiftbotlab.workers.dev/probar?lang=en) (Spanish, with an English version): enter your Celo address and pay a 1,000 wARS (about US$0.60) test rent in about two minutes. Your address is the landlord, so 997 wARS come back to you, less the 0.3% fee. It runs through the same lease contract, agent and receipt as a real rent.
+Every page is in Spanish by default and in English with `?lang=en` (the ES/EN switch is in the header and every link keeps the language). The links below open the English version.
+
+1. **Use it with no wallet.** Open the [calculator](https://aldia.swiftbotlab.workers.dev/calculadora?lang=en), enter a rent and a start date, and read which months of IPC were used.
+2. **See what a tenant sees.** [A rent raised by IPC](https://aldia.swiftbotlab.workers.dev/pagar/c658d0b11729?lang=en). This one was loaded from a PDF and audited against its clause. It is a test lease, so it shows no pay button.
+3. **See a receipt.** [ICL rent settled through Textile](https://aldia.swiftbotlab.workers.dev/recibo/8650326827d3/2026-11?lang=en), with the payment and settlement transactions linked and the agent's venue decision: the contract's floor, the Uniswap and Textile quotes, the venue chosen and why.
+4. **See who really used it.** The [transparency page](https://aldia.swiftbotlab.workers.dev/transparencia?lang=en) separates our tests from real use.
+5. **Create a lease.** [Load a lease](https://aldia.swiftbotlab.workers.dev/nuevo?lang=en) takes about a minute. The agent creates the on-chain account only when the first payment arrives, so an unused lease costs nothing.
+6. **Pay a real rent yourself.** [Try it](https://aldia.swiftbotlab.workers.dev/probar?lang=en): enter your Celo address and pay a 1,000 wARS (about US$0.60) test rent in about two minutes, from a wallet or by bank transfer through Ripio (Argentina). Your address is the landlord, so 997 wARS come back to you, less the 0.3% fee. It runs through the same lease contract, agent and receipt as a real rent.
 7. **Read it without a browser.** Every public page is rendered on the server, so `curl` shows the same numbers and transaction links as the app. [/llms.txt](https://aldia.swiftbotlab.workers.dev/llms.txt) is a plain-text summary with the steps to check each claim on chain.
 
 ## Where users and volume came from
 
 > [!IMPORTANT]
 > **No independent user has paid through Al Día yet.** Every lease and payment listed below is a builder test: we funded the payments from our own agent wallet, and those leases carry a test label on the site. Nothing here is presented as customer volume. The transparency page counts an outside payer only after an automatic check on Celo's public explorer (Blockscout): the payment came straight from a wallet that is not ours, whose first funds did not come from one of our wallets, and whose first Celo activity is before 6 October 2026, the hackathon's independent-user rule. Anything that cannot be proven is not counted, and payments that fail the check are listed with the reason. Payers from the open test at `/probar` are labelled "fellow hackathon builder" when we cannot tell who they are.
+>
+> **Rents paid by bank transfer through Ripio** arrive from Ripio's own wallet, not the tenant's, so the wallet rule above would score Ripio's hot wallet as one "payer" and merge every tenant into it. They have their own rule ([`worker/outside.js`](worker/outside.js), `rampMonth`): the wARS came from a known Ripio ramp wallet and that same wallet signed the transaction; the lease is not a builder test, and its landlord (the payout address in the Worker's own lease record) is not one of our wallets and never received anything from one of our wallets up to the payment; and what Ripio delivered that month is within 2% of the charge the tenant page asked for (the month's rent, or what was still owed after other payments that month). We have no Ripio account. Each ramp-paid lease counts once per landlord, in its own line on the transparency page; no landlord or Ripio address is published. Ripio's delivery wallet, `0x0f776cc057622f0da2f257d2b987a7cf3386b7cc`, was identified from public chain data (active since February 2025, refilled with wARS by one treasury wallet, paying round peso amounts to dozens of unrelated wallets), not confirmed by Ripio.
 
 | Test | Rent | What it proves | Payment | Settlement |
 |---|---|---|---|---|
@@ -66,7 +70,7 @@ In the third test we told the agent to take Textile even though Uniswap was a li
 
 The fourth rent went through Uniswap even though Textile previewed a little better, because its sweep was under Textile's $1 minimum. Across the four rents the agent paid 8,961 wARS of our own money through the system.
 
-The tenant path through Ripio's ramp link is built, but we have not completed it end to end: it needs an Argentine account and Ripio's KYC, which we do not have. Our tests pay wARS directly.
+The tenant path through Ripio's ramp link is built and counted by the rule above, but nobody has completed it end to end yet: it needs an Argentine account and Ripio's KYC, which we do not have. Our tests pay wARS directly. The open test at `/probar` now offers the same Ripio link, so anyone in Argentina with a Ripio account can be the first.
 
 ## Celo stack
 
