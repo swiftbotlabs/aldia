@@ -252,7 +252,7 @@ export async function pageProbarLease(env, url, id, waitUntil) {
     : html`<p class="small muted" style="margin:0">${t.later4}</p>`);
   const unjudged = st.phase === "paid" && !st.builderTest && !st.verdicts.some((v) => v.reason !== "unchecked");
   const waiting = st.phase === "preparing" || st.phase === "settling" || st.phase === "waiting" || unjudged;
-  const body = html`${langSwitch(lang, `/probar/${id}`)}<h1>${t.leaseH1}</h1>${countBox(lang, o)}<div id="probar-state" data-id="${id}" data-step="${st.step}" data-phase="${st.phase}" hidden></div><p id="probar-panel" class="small" hidden></p>${s1}${s2}${s3}${s4}<p class="small"><a href="/probar${q(lang)}">${t.back}</a></p>`;
+  const body = html`${langSwitch(lang, `/probar/${id}`)}<h1>${t.leaseH1}</h1>${countBox(lang, o)}<div id="probar-state" data-id="${id}" data-step="${st.step}" data-phase="${st.phase}" hidden></div><p id="probar-panel" class="small" hidden></p>${st.builderTest ? html`<div class="note warn">${t.ourTest}</div>` : ""}${s1}${s2}${s3}${s4}<p class="small"><a href="/probar${q(lang)}">${t.back}</a></p>`;
   return { status: 200, lang, noindex: true, refresh: waiting ? 20 : 0, title: t.leaseTitle, description: `${t.lead}`, body };
 }
 

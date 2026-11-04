@@ -292,6 +292,12 @@ const tOurs = await settled(EXTRA, EXTRA, 1000, { id: "aaaaaaaaaa05" });
 const tBroken = await settled(W.broken, W.broken, 1000, { id: "aaaaaaaaaa06" });
 const tTest = await settled(LANDLORD, LANDLORD, 1000, { id: "aaaaaaaaaa07", builderTest: true });
 
+// A test lease whose landlord is one of our wallets says so on its own page
+r = await form({ wallet: toChecksum(LANDLORD) });
+const ourId = r.headers.get("location").match(/\/probar\/([0-9a-f]{12})/)[1];
+kv.set(`pub:${ourId}`, JSON.stringify({ ...pub, id: ourId, builderTest: true }));
+assert.ok(strip(await text(await call(`/probar/${ourId}`))).includes("Esta es una prueba nuestra"));
+kv.delete(`pub:${ourId}`);
 const ext = await (await call("/api/externos")).json();
 assert.strictEqual(ext.count, 1, "exactly one outside payer: " + JSON.stringify(ext));
 assert.strictEqual(ext.payers[0].address, W.old);
