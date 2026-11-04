@@ -9,6 +9,9 @@ from envfile import read_env
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NAME = "aldia"
 ENV = "/home/agent/agent/secrets/aldia_worker.env"
+# Our other wallets, excluded from the outside-payer count. Outside the public repo; the deploy refuses to run without it.
+EXTRA_OURS = os.path.join(os.path.dirname(ROOT), "private", "aldia_extra_ours.txt")
+MODULES = ["worker.js", "assets.js", "pages.js", "rent.mjs", "outside.js", "probar.js", "eip55.js"]
 TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
          ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json; charset=utf-8", ".mp4": "video/mp4"}
 
@@ -53,27 +56,36 @@ def bundle():
     return src
 
 
+def extra_ours():
+    import re
+    if not os.path.exists(EXTRA_OURS):
+        sys.exit("missing " + EXTRA_OURS + ": the outside-payer check would not know our other wallets")
+    addrs = [l.strip().lower() for l in open(EXTRA_OURS, encoding="utf-8") if re.fullmatch(r"0x[0-9a-fA-F]{40}", l.strip())]
+    if not addrs:
+        sys.exit("no addresses in " + EXTRA_OURS)
+    return ",".join(addrs)
+
+
 def main():
     assets_src = bundle()
-    worker_src = open(os.path.join(ROOT, "worker", "worker.js"), encoding="utf-8").read()
-    pages_src = open(os.path.join(ROOT, "worker", "pages.js"), encoding="utf-8").read()
-    rent_src = open(os.path.join(ROOT, "worker", "rent.mjs"), encoding="utf-8").read()
+    srcs = {m: open(os.path.join(ROOT, "worker", m), encoding="utf-8").read() for m in MODULES if m != "assets.js"}
+    srcs["assets.js"] = assets_src
     if "--bundle-only" in sys.argv:
         print("bundled", len(assets_src))
         return
+    extra = extra_ours()
     ns = namespace()
     meta = {"main_module": "worker.js", "compatibility_date": "2026-01-15",
             "bindings": [{"type": "kv_namespace", "name": "KV", "namespace_id": ns},
-                         {"type": "secret_text", "name": "AGENT_TOKEN", "text": agent_token()}]}
+                         {"type": "secret_text", "name": "AGENT_TOKEN", "text": agent_token()},
+                         {"type": "secret_text", "name": "EXTRA_OURS", "text": extra}]}
     b = "----aldia" + uuid.uuid4().hex
     def part(name, filename, ctype, body):
         head = f'--{b}\r\nContent-Disposition: form-data; name="{name}"' + (f'; filename="{filename}"' if filename else "") + f"\r\nContent-Type: {ctype}\r\n\r\n"
         return head.encode() + body.encode() + b"\r\n"
     raw = part("metadata", None, "application/json", json.dumps(meta)) \
-        + part("worker.js", "worker.js", "application/javascript+module", worker_src) \
-        + part("assets.js", "assets.js", "application/javascript+module", assets_src) \
-        + part("pages.js", "pages.js", "application/javascript+module", pages_src) \
-        + part("rent.mjs", "rent.mjs", "application/javascript+module", rent_src) + f"--{b}--\r\n".encode()
+        + b"".join(part(m, m, "application/javascript+module", srcs[m]) for m in MODULES) + f"--{b}--\r\n".encode()
+    print("modules", ", ".join(MODULES), "excluded wallets", len(extra.split(",")) + 2)
     c, d = cf.api("PUT", f"/accounts/{cf.ACCOUNT}/workers/scripts/{NAME}", raw=raw,
                   headers={"content-type": f"multipart/form-data; boundary={b}"}, timeout=120)
     print("upload", c, d.get("success"), [e.get("message") for e in d.get("errors", [])][:3])

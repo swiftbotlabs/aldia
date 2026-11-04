@@ -36,7 +36,8 @@ fs.writeFileSync(path.join(here, "../worker/assets.js"), fs.existsSync(path.join
 assert.ok(fs.readFileSync(path.join(here, "../worker/rent.mjs"), "utf8").includes(fs.readFileSync(path.join(here, "../web/rent.js"), "utf8")), "run ops/deploy_worker.py --bundle-only first");
 const { default: worker, validateLease } = await import("../worker/worker.js");
 const pages = await import("../worker/pages.js");
-const env = { KV, AGENT_TOKEN: "t".repeat(64), SSR_CACHE_MS: 0 };
+// No test here may reach the network: the outside-payer check gets a fetch that fails loudly.
+const env = { KV, AGENT_TOKEN: "t".repeat(64), SSR_CACHE_MS: 0, OUTSIDE_FRESH_MS: 0, FETCH: async (u) => { throw new Error("unexpected network call " + u); } };
 const call = (url, init) => worker.fetch(new Request("https://x.test" + url, init), env);
 const post = (url, body, headers = {}) => call(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
 const good = { propertyLabel: "Depto Almagro", tenantLabel: "Martina", baseRent: 500000, startDate: "2026-03-01", dueDay: 10, index: "IPC", periodMonths: 4, lagMonths: 2, fixedPct: 0, sweepBps: 5000, payout: "0x8EE66fcd89e2cb492B9B19B1380D93E792Df9aAa" };
@@ -120,7 +121,8 @@ const txLink = (t) => `href="https://celoscan.io/tx/${t}"`;
 const tr = await page("/transparencia");
 plainPage(tr, "Transparencia · Al Día");
 const st = fx("stats");
-for (const [n, label] of [[st.leasesThird, "contratos de terceros"], [st.paymentsThird, "pagos de terceros"], [st.leasesTest, "contratos de prueba nuestros"], [st.paymentsTest, "pagos de prueba nuestros"]]) {
+// The agent's raw "not our wallet" counts are not shown: only payers that passed the independence check (none here).
+for (const [n, label] of [[0, "pagadores externos verificados"], [0, "pagos externos verificados"], [st.leasesTest, "contratos de prueba nuestros"], [st.paymentsTest, "pagos de prueba nuestros"]]) {
   assert.ok(tr.body.includes(`<b>${n}</b><span class="small muted">${label}</span>`), label);
 }
 assert.ok(tr.body.includes('href="https://8004scan.io/agents/celo/10014"') && tr.body.includes("celoscan.io/address/0xED120aeC2240A25125B3f32Eb8Bff9C5F688121b"));
@@ -134,7 +136,8 @@ for (const id of ["3c9a8784b63e", "74414e7210ef", "8650326827d3", "0b069750a07b"
 for (const c of st.paidCalls.recent) assert.ok(tr.body.includes(txLink(c.tx)));
 assert.ok(textOf(tr.body).includes(`${st.paidCalls.count} llamadas pagas por x402 en Celo`));
 assert.ok(textOf(tr.body).includes(`Último IPC ${new Intl.DateTimeFormat("es-AR", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(idxRecord.ipcLast + "-15T00:00:00Z"))}`));
-assert.match(meta(tr.body, "description"), /Contratos de terceros: 0\. Pagos de terceros: 0\. Pruebas nuestras: 5 contratos y 4 pagos\./);
+assert.match(meta(tr.body, "description"), /Pagadores externos verificados: 0\. Pagos externos verificados: 0\. Pruebas nuestras: 5 contratos y 4 pagos\./);
+assert.ok(tr.body.includes('id="externos"') && textOf(tr.body).includes("Todavía ninguno.") && tr.body.includes('href="/probar"'), "outside-payer section, honest zero, link to the open test");
 
 // Sample tenant page: amount, status, due date, why, how to pay
 const tenant = fx("pub:c658d0b11729");
@@ -226,7 +229,7 @@ assert.strictEqual(llms.status, 200);
 assert.match(llms.headers.get("content-type"), /^text\/plain; charset=utf-8/);
 const lt = await llms.text();
 assert.ok(lt.startsWith("# Al Día\n") && !/<html|<script|<div/i.test(lt));
-for (const want of [pages.ONCHAIN.agentWallet, pages.ONCHAIN.factory, pages.ONCHAIN.implementation, pages.ONCHAIN.identityTx, pages.ONCHAIN.tag, "https://x.test/transparencia", "https://x.test/pagar/c658d0b11729", "https://x.test/recibo/8650326827d3/2026-11", "https://x.test/calculadora", "Leases from third parties: 0. Payments from third parties: 0.", "550000 x 1.201778 = 660978 pesos. The agent charged 660978 pesos on that lease (they match)."]) {
+for (const want of [pages.ONCHAIN.agentWallet, pages.ONCHAIN.factory, pages.ONCHAIN.implementation, pages.ONCHAIN.identityTx, pages.ONCHAIN.tag, "https://x.test/transparencia", "https://x.test/pagar/c658d0b11729", "https://x.test/recibo/8650326827d3/2026-11", "https://x.test/calculadora", "Outside payers so far: 0 (verified payments: 0).", "https://x.test/probar?lang=en", "550000 x 1.201778 = 660978 pesos. The agent charged 660978 pesos on that lease (they match)."]) {
   assert.ok(lt.includes(want), "llms.txt has " + want);
 }
 for (const id of ["3c9a8784b63e", "74414e7210ef", "8650326827d3", "0b069750a07b"]) {

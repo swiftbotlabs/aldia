@@ -1,7 +1,10 @@
 // Al Día public site and API on Cloudflare Workers. Holds no keys and moves no money: it stores what people type and
 // shows what the agent publishes. The agent runs elsewhere and reaches this Worker over outbound HTTPS only.
 import { ASSETS } from "./assets.js";
-import { renderPage, renderLlms, testRents } from "./pages.js";
+import { renderPage, renderLlms, testRents, probarId, cleanOutside } from "./pages.js";
+import { renderProbar, probarApi, probarTerms, LIMITS as PROBAR_LIMITS } from "./probar.js";
+import { outsideSummary } from "./outside.js";
+import { checksumOk } from "./eip55.js";
 
 const MAX_BODY = 40_000;
 const AGENT_WALLET = "0xed120aec2240a25125b3f32eb8bff9c5f688121b";
@@ -127,6 +130,17 @@ export function validateLease(b, today = new Date()) {
   };
 }
 
+// One lease record, the agent's queue entry and its pending marker: the same path for /nuevo and for /probar.
+async function storeLease(env, lease) {
+  const id = randomId(6);
+  const token = randomId(16);
+  const record = { ...lease, id, createdAt: new Date().toISOString(), keyHash: await sha256Hex(token) };
+  await env.KV.put(`lease:${id}`, JSON.stringify(record));
+  await env.KV.put(`pending:${id}`, "1");
+  await enqueue(env, "leases", id);
+  return { id, token, createdAt: record.createdAt };
+}
+
 async function createLease(req, env) {
   const body = await readJson(req);
   if (!body) return fail(400, "bad_json", "No pudimos leer los datos.");
@@ -134,13 +148,67 @@ async function createLease(req, env) {
   if (errors) return json({ error: "invalid", fields: errors }, 422);
   if (await rateLimited(req, "lease", 6, 3600)) return fail(429, "slow_down", "Demasiados intentos. Probá en un rato.");
   if (await dailyCap(env, "lease", 150)) return fail(429, "cap", "Llegamos al cupo de hoy. Probá mañana.");
-  const id = randomId(6);
-  const token = randomId(16);
-  const record = { ...lease, id, createdAt: new Date().toISOString(), keyHash: await sha256Hex(token) };
-  await env.KV.put(`lease:${id}`, JSON.stringify(record));
-  await env.KV.put(`pending:${id}`, "1");
-  await enqueue(env, "leases", id);
+  const { id, token } = await storeLease(env, lease);
   return json({ id, token }, 201);
+}
+
+// Counters in KV (the Cache API may not hold state on workers.dev). All are read first and bumped only when every one
+// still has room, so a refused try never uses up another limit.
+async function kvLimits(env, checks) {
+  const vals = await Promise.all(checks.map(([key]) => env.KV.get(key)));
+  const n = vals.map((v) => parseInt(v || "0", 10) || 0);
+  const over = checks.findIndex(([, limit], i) => n[i] >= limit);
+  if (over >= 0) return checks[over][2];
+  await Promise.all(checks.map(([key], i) => env.KV.put(key, String(n[i] + 1), { expirationTtl: 172800 })));
+  return null;
+}
+
+async function probarPage(url, env, ctx, status, error, value) {
+  const page = await renderProbar(url, env, ctx && ctx.waitUntil ? (p) => ctx.waitUntil(p) : null, { error, value, status });
+  return new Response(page.html, { status: page.status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", ...SECURITY } });
+}
+
+// POST /probar: a plain HTML form, so it works without JavaScript. Creates a 1,000 wARS test lease whose landlord is the
+// address typed in, then sends the browser to its page. The landlord key travels only in the URL fragment.
+async function createProbar(req, env, ctx, url) {
+  const origin = req.headers.get("origin");
+  if (origin && origin !== url.origin) return probarPage(url, env, ctx, 403, "origin", "");
+  const len = parseInt(req.headers.get("content-length") || "0", 10);
+  const type = (req.headers.get("content-type") || "").toLowerCase();
+  if (len > 2000 || !type.startsWith("application/x-www-form-urlencoded")) return probarPage(url, env, ctx, 400, "form", "");
+  const text = await req.text();
+  if (text.length > 2000) return probarPage(url, env, ctx, 400, "form", "");
+  const form = new URLSearchParams(text);
+  const lang = form.get("lang") === "en" || url.searchParams.get("lang") === "en" ? "en" : "es";
+  const view = new URL(url.origin + "/probar" + (lang === "en" ? "?lang=en" : ""));
+  const wallet = String(form.get("wallet") || "").trim().slice(0, 100);
+  if (!/^0x[0-9a-fA-F]{40}$/.test(wallet) || /^0x0{36}/.test(wallet)) return probarPage(view, env, ctx, 422, "format", wallet);
+  if (!checksumOk(wallet)) return probarPage(view, env, ctx, 422, "checksum", wallet);
+  if (wallet.toLowerCase() === AGENT_WALLET) return probarPage(view, env, ctx, 422, "agent", wallet);
+  const { lease, errors } = validateLease(probarTerms(wallet));
+  if (errors) return probarPage(view, env, ctx, 422, "format", wallet);
+  const addr = wallet.toLowerCase();
+  const go = (id, token) => new Response(null, { status: 303, headers: { location: `/probar/${id}${lang === "en" ? "?lang=en" : ""}${token ? `#k=${token}` : ""}`, "cache-control": "no-store", ...SECURITY } });
+  // The same address with a recent test lease that is not settled yet gets that one back: nothing new, no limit used.
+  const prev = await env.KV.get(`probar:addr:${addr}`).then((v) => (v ? JSON.parse(v) : null)).catch(() => null);
+  if (prev && /^[0-9a-f]{12}$/.test(prev.id) && Date.now() - Date.parse(prev.createdAt) < 7 * 86400e3) {
+    const pub = await env.KV.get(`pub:${prev.id}`).then((v) => (v ? JSON.parse(v) : null)).catch(() => null);
+    const paid = pub && Array.isArray(pub.history) && pub.history.some((x) => x && x.status === "pagado");
+    if (!paid) return go(prev.id, null);   // still open, or paid and waiting for the agent: the same lease
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  const ip = await sha256Hex("probar:" + (req.headers.get("cf-connecting-ip") || "unknown"));
+  const over = await kvLimits(env, [
+    [`rl:probar:addr:${addr}:${today}`, PROBAR_LIMITS.perAddress, "limit"],
+    [`rl:probar:ip:${ip.slice(0, 32)}:${today}`, PROBAR_LIMITS.perIp, "limit"],
+    [`count:probar:${today}`, PROBAR_LIMITS.perDay, "cap"],
+  ]);
+  if (over) return probarPage(view, env, ctx, 429, over, wallet);
+  if (await dailyCap(env, "lease", 150)) return probarPage(view, env, ctx, 429, "cap", wallet);
+  const { id, token, createdAt } = await storeLease(env, { ...lease, probar: true });
+  await env.KV.put(`probar:${id}`, JSON.stringify({ id, payout: addr, createdAt, month: lease.startDate.slice(0, 7) }));
+  await env.KV.put(`probar:addr:${addr}`, JSON.stringify({ id, createdAt }));
+  return go(id, token);
 }
 
 async function enqueue(env, field, id) {
@@ -222,7 +290,7 @@ async function kvJson(env, key, fallback = null) {
   return raw ? json(JSON.parse(raw)) : fallback;
 }
 
-async function api(req, env, path) {
+async function api(req, env, path, ctx) {
   if (req.method === "POST") {
     // Writes come from our own pages. This is not authentication, but it stops other sites from spending the daily caps.
     const origin = req.headers.get("origin");
@@ -235,17 +303,29 @@ async function api(req, env, path) {
   if (path === "/api/stats") return (await kvJson(env, "stats")) || json({});
   if (path === "/api/health") return (await kvJson(env, "health")) || json({});
   if (path === "/api/pruebas") return json(await testRents(env));
+  if (path === "/api/externos") {
+    const o = cleanOutside(await outsideSummary(env, ctx && ctx.waitUntil ? (p) => ctx.waitUntil(p) : null));
+    return json({ ...o, rule: { cutoff: "2026-10-06", label: "fellow hackathon builder" } }, 200, { "cache-control": "public, max-age=60" });
+  }
   let m = path.match(/^\/api\/leer\/([0-9a-f]{16})$/);
   if (m) return (await kvJson(env, `readres:${m[1]}`)) || json({ status: "working" });
+  m = path.match(/^\/api\/probar\/([0-9a-f]{12})$/);
+  if (m) {
+    const st = await probarApi(env, m[1]);
+    return st ? json(st) : fail(404, "not_found", "No encontramos ese alquiler de prueba.");
+  }
   m = path.match(/^\/api\/lease\/([0-9a-f]{12})$/);
   if (m) {
-    const pub = await kvJson(env, `pub:${m[1]}`);
-    if (pub) return pub;
+    const pubRaw = await env.KV.get(`pub:${m[1]}`);
+    if (pubRaw) return json({ ...JSON.parse(pubRaw), probar: (await probarId(env, m[1])) !== null });
     const raw = await env.KV.get(`lease:${m[1]}`);
     return raw ? json({ id: m[1], preparing: true }) : fail(404, "not_found", "No encontramos ese contrato.");
   }
   m = path.match(/^\/api\/recibo\/([0-9a-f]{12})\/(\d{4}-\d{2})$/);
-  if (m) return (await kvJson(env, `receipt:${m[1]}:${m[2]}`)) || fail(404, "not_found", "No hay recibo para ese mes.");
+  if (m) {
+    const raw = await env.KV.get(`receipt:${m[1]}:${m[2]}`);
+    return raw ? json({ ...JSON.parse(raw), probar: (await probarId(env, m[1])) !== null }) : fail(404, "not_found", "No hay recibo para ese mes.");
+  }
   m = path.match(/^\/api\/panel\/([0-9a-f]{12})$/);
   if (m) {
     const raw = await env.KV.get(`lease:${m[1]}`);
@@ -272,22 +352,28 @@ function asset(path) {
 }
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const url = new URL(req.url);
     const path = url.pathname;
+    const waitUntil = ctx && ctx.waitUntil ? (p) => ctx.waitUntil(p) : null;
     try {
       if (path.startsWith("/agent/")) return await agentApi(req, env, path);
-      if (path.startsWith("/api/")) return await api(req, env, path);
+      if (path.startsWith("/api/")) return await api(req, env, path, ctx);
+      if (path === "/probar" && req.method === "POST") return await createProbar(req, env, ctx, url);
       if (req.method !== "GET" && req.method !== "HEAD") return fail(405, "method", "no");
+      if (path === "/probar" || /^\/probar\/[0-9a-f]{12}$/.test(path)) {
+        const page = await renderProbar(url, env, waitUntil);
+        return new Response(page.html, { status: page.status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": path === "/probar" ? "public, max-age=60" : "no-store", ...SECURITY } });
+      }
       if (path === "/llms.txt") {
-        const text = await renderLlms(url, env);
+        const text = await renderLlms(url, env, waitUntil);
         return new Response(text, { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=300", ...SECURITY } });
       }
       if (path === "/index.html") return new Response(null, { status: 301, headers: { location: "/", ...SECURITY } });
       const a = asset(path);
       if (a) return a;
       // Every page is rendered here with its real content; the browser app takes over when JavaScript runs.
-      const page = await renderPage(url, env);
+      const page = await renderPage(url, env, waitUntil);
       return new Response(page.html, { status: page.status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=60", ...SECURITY } });
     } catch (e) {
       console.log("error", path, String(e).slice(0, 200));

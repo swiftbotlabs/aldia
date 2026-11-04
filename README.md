@@ -47,12 +47,13 @@ Each lease is its own contract, [`AlDiaLease`](contracts/src/AlDiaLease.sol). Th
 3. **See a receipt.** [ICL rent settled through Textile](https://aldia.swiftbotlab.workers.dev/recibo/8650326827d3/2026-11), with the payment and settlement transactions linked.
 4. **See who really used it.** The [transparency page](https://aldia.swiftbotlab.workers.dev/transparencia) separates our tests from real use.
 5. **Create a lease.** [Cargar contrato](https://aldia.swiftbotlab.workers.dev/nuevo) takes about a minute. The agent creates the on-chain account only when the first payment arrives, so an unused lease costs nothing.
-6. **Read it without a browser.** Every public page is rendered on the server, so `curl` shows the same numbers and transaction links as the app. [/llms.txt](https://aldia.swiftbotlab.workers.dev/llms.txt) is a plain-text summary with the steps to check each claim on chain.
+6. **Pay a real rent yourself.** [Probar](https://aldia.swiftbotlab.workers.dev/probar?lang=en) (Spanish, with an English version): enter your Celo address and pay a 1,000 wARS (about US$0.60) test rent in about two minutes. Your address is the landlord, so 997 wARS come back to you, less the 0.3% fee. It runs through the same lease contract, agent and receipt as a real rent.
+7. **Read it without a browser.** Every public page is rendered on the server, so `curl` shows the same numbers and transaction links as the app. [/llms.txt](https://aldia.swiftbotlab.workers.dev/llms.txt) is a plain-text summary with the steps to check each claim on chain.
 
 ## Where users and volume came from
 
 > [!IMPORTANT]
-> **No independent user has paid through Al Día yet.** Every lease and payment listed below is a builder test: we funded the payments from our own agent wallet, and those leases carry a test label on the site. Nothing here is presented as customer volume. The transparency page moves a payment to "third party" only when its wARS come from a wallet that is not ours.
+> **No independent user has paid through Al Día yet.** Every lease and payment listed below is a builder test: we funded the payments from our own agent wallet, and those leases carry a test label on the site. Nothing here is presented as customer volume. The transparency page counts an outside payer only after an automatic check on Celo's public explorer (Blockscout): the payment came straight from a wallet that is not ours, whose first funds did not come from one of our wallets, and whose first Celo activity is before 6 October 2026, the hackathon's independent-user rule. Anything that cannot be proven is not counted, and payments that fail the check are listed with the reason. Payers from the open test at `/probar` are labelled "fellow hackathon builder" when we cannot tell who they are.
 
 | Test | Rent | What it proves | Payment | Settlement |
 |---|---|---|---|---|

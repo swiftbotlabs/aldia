@@ -62,6 +62,7 @@ function shell(...content) {
     h("footer", {}, h("div", { class: "wrap" },
       h("p", {}, "Al Día es un producto de Swift Bot Labs. No somos una inmobiliaria ni un banco, y este sitio no reemplaza tu contrato ni un asesoramiento legal o impositivo."),
       h("p", {}, h("a", { href: "/transparencia", "data-link": 1 }, "Transparencia"), " · ",
+        h("a", { href: "/probar" }, "Probalo con 1.000 wARS"), " · ",
         h("a", { href: "https://github.com/swiftbotlabs/aldia", rel: "noopener" }, "Código abierto"), " · Índices: ",
         h("a", { href: INDEC_PAGE, rel: "noopener" }, "INDEC"), " y ", h("a", { href: BCRA_PAGE, rel: "noopener" }, "BCRA")))));
   if (!first) window.scrollTo(0, 0);
@@ -489,7 +490,8 @@ function statusChip(st) {
   return h("span", { class: "chip " + c }, t);
 }
 function testBanner(pub) {
-  return pub.builderTest ? h("div", { class: "note warn" }, "Este es un contrato de prueba de Swift Bot Labs para mostrar el producto. No hay propietario ni inquilino reales.") : null;
+  if (pub.builderTest) return h("div", { class: "note warn" }, "Este es un contrato de prueba de Swift Bot Labs para mostrar el producto. No hay propietario ni inquilino reales.");
+  return pub.probar === true && /^[0-9a-f]{12}$/.test(pub.id || "") ? h("div", { class: "note" }, "Prueba abierta de Al Día: quien paga es también el propietario, así que los wARS vuelven a su billetera, menos el 0,3 %. ", h("a", { href: `/probar/${pub.id}` }, "Ver los pasos"), ".") : null;
 }
 const BOT = "https://t.me/AlDiaAvisosBot";
 async function sha256Hex(text) {
@@ -501,9 +503,13 @@ const clauseNote = (c) => (c && c.clauseCheck ? h("p", { class: "small", style: 
   isTx(c.clauseCheck.tx) ? [" ", h("a", { href: TX_URL(c.clauseCheck.tx), rel: "noopener" }, "Ver la revisión paga en Celo"), "."] : null) : null);
 const rampUrl = (amount, address) => `https://ramp.ripio.com/?country=AR&chain=42220&token=WARS&amount=${amount}&address=${address}`;
 
-async function payWithWallet(pub, status) {
+const PAY_MSG = {
+  es: { low: "Tu billetera no tiene suficientes wARS. Usá el pago por transferencia.", sent: "Pago enviado. En unos minutos el agente lo concilia y queda el recibo. ", see: "Ver operación", fail: "No se pudo enviar el pago." },
+  en: { low: "Your wallet does not hold enough wARS.", sent: "Payment sent. The agent settles it within minutes and the receipt appears here. ", see: "See transaction", fail: "The payment could not be sent." },
+};
+async function payWithWallet(pub, status, msg = PAY_MSG.es, account = null) {
   const eth = window.ethereum;
-  const [from] = await eth.request({ method: "eth_requestAccounts" });
+  const [from] = account ? [account] : await eth.request({ method: "eth_requestAccounts" });
   try {
     await eth.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0xa4ec" }] });
   } catch { /* MiniPay is already on Celo */ }
@@ -511,11 +517,12 @@ async function payWithWallet(pub, status) {
   const data = "0xa9059cbb" + pub.collector.slice(2).toLowerCase().padStart(64, "0") + owed.toString(16).padStart(64, "0") + TAG_SUFFIX;
   const bal = await eth.request({ method: "eth_call", params: [{ to: WARS, data: "0x70a08231" + from.slice(2).toLowerCase().padStart(64, "0") }, "latest"] });
   if (BigInt(bal) < owed) {
-    status.replaceChildren(h("div", { class: "note warn" }, "Tu billetera no tiene suficientes wARS. Usá el pago por transferencia."));
-    return;
+    status.replaceChildren(h("div", { class: "note warn" }, msg.low));
+    return null;
   }
   const hash = await eth.request({ method: "eth_sendTransaction", params: [{ from, to: WARS, data }] });
-  status.replaceChildren(h("div", { class: "note" }, "Pago enviado. En unos minutos el agente lo concilia y queda el recibo. ", h("a", { href: TX_URL(hash), rel: "noopener" }, "Ver operación")));
+  status.replaceChildren(h("div", { class: "note" }, msg.sent, isTx(hash) ? h("a", { href: TX_URL(hash), rel: "noopener" }, msg.see) : null));
+  return hash;
 }
 
 async function viewPay(id) {
@@ -720,7 +727,8 @@ async function viewReceipt(id, month) {
     return;
   }
   document.title = `Recibo de ${monthName(month)} · ${r.propertyLabel} · Al Día`;
-  shell(r.builderTest ? h("div", { class: "note warn" }, "Recibo de prueba de Swift Bot Labs. No hay propietario ni inquilino reales.") : null,
+  shell(r.builderTest ? h("div", { class: "note warn" }, "Recibo de prueba de Swift Bot Labs. No hay propietario ni inquilino reales.")
+    : r.probar === true ? h("div", { class: "note" }, "Recibo de una prueba abierta de Al Día: quien pagó es también el propietario. ", h("a", { href: `/probar/${id}` }, "Ver los pasos"), ".") : null,
     h("section", { class: "card" },
       h("h1", {}, `Recibo de ${monthName(month)}`),
       h("p", { class: "muted" }, r.propertyLabel),
@@ -749,21 +757,23 @@ async function viewTransparency() {
   let s = {};
   let idx = null;
   let rents = [];
+  let o = { count: 0, payments: 0, payers: [], notCounted: [], checkedAt: null };
   try {
-    [s, idx, rents] = await Promise.all([api("/api/stats"), indices().catch(() => null), api("/api/pruebas").catch(() => [])]);
+    [s, idx, rents, o] = await Promise.all([api("/api/stats"), indices().catch(() => null), api("/api/pruebas").catch(() => []), api("/api/externos").catch(() => o)]);
   } catch { /* show what we have */ }
   const n = (v) => (v === undefined ? "—" : v);
   shell(h("h1", {}, "Transparencia"),
     h("p", { class: "muted" }, "Lo que se puede comprobar, con su fuente. Separamos lo nuestro de lo real."),
     h("section", { class: "stats" },
-      h("div", { class: "stat" }, h("b", {}, n(s.leasesThird)), h("span", { class: "small muted" }, "contratos de terceros")),
-      h("div", { class: "stat" }, h("b", {}, n(s.paymentsThird)), h("span", { class: "small muted" }, "pagos de terceros")),
+      h("div", { class: "stat" }, h("b", {}, n(o.count)), h("span", { class: "small muted" }, "pagadores externos verificados")),
+      h("div", { class: "stat" }, h("b", {}, n(o.payments)), h("span", { class: "small muted" }, "pagos externos verificados")),
       h("div", { class: "stat" }, h("b", {}, n(s.leasesTest)), h("span", { class: "small muted" }, "contratos de prueba nuestros")),
       h("div", { class: "stat" }, h("b", {}, n(s.paymentsTest)), h("span", { class: "small muted" }, "pagos de prueba nuestros"))),
     h("section", { class: "card", style: "margin-top:14px" },
       h("h3", {}, "De dónde salen estos números"),
-      h("p", { class: "small" }, s.note || "Un pago cuenta como de terceros solo si los wARS no salieron de una billetera nuestra. Hasta que eso pase, todo lo que ves son pruebas hechas por nosotros."),
+      h("p", { class: "small" }, s.note || "Un pago cuenta como externo solo si pasa el control de abajo, que se hace solo con datos públicos de la red. Nuestras pruebas se cuentan aparte, como pruebas nuestras."),
       s.updatedAt ? h("p", { class: "tiny" }, `Actualizado: ${s.updatedAt}`) : null),
+    outsideCard(o),
     idx ? h("section", { class: "card" },
       h("h3", {}, "Índices oficiales"),
       h("dl", { class: "kv" },
@@ -796,6 +806,112 @@ async function viewTransparency() {
       h("table", {}, s.paidCalls.recent.map((c) => h("tr", {}, h("td", {}, c.service), h("td", { class: "r" }, usd3(c.usd)), h("td", { class: "r" }, c.tx ? h("a", { href: TX_URL(c.tx), rel: "noopener" }, "tx") : "—"))))) : null);
 }
 
+/* ---------- Outside payers (the Worker checks them; /api/externos returns only rows that passed its own validation) ---------- */
+const REASON_ES = { ours: "billetera nuestra", "funded-by-us": "sus primeros fondos vinieron de una billetera nuestra", "new-wallet": "su primera operación en Celo es posterior al 6 de octubre de 2026",
+  unclear: "no se ve de dónde salieron sus primeros fondos", "no-history": "el explorador todavía no muestra su historial", indirect: "los wARS no salieron directo de la billetera que firmó",
+  partial: "pagó menos de la mitad del alquiler del mes", unchecked: "todavía no la pudimos revisar", invalid: "dirección inválida" };
+const isAddr = (a) => typeof a === "string" && /^0x[0-9a-fA-F]{40}$/.test(a);
+const isDayStr = (d) => typeof d === "string" && /^\d{4}-\d{2}-\d{2}/.test(d);
+const dayFull = (d) => new Intl.DateTimeFormat("es-AR", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(d.slice(0, 10) + "T12:00:00Z"));
+function outsideCard(o) {
+  const payers = (Array.isArray(o.payers) ? o.payers : []).filter((p) => p && isAddr(p.address) && isTx(p.tx));
+  const skipped = (Array.isArray(o.notCounted) ? o.notCounted : []).filter((r) => r && Object.hasOwn(REASON_ES, r.reason));
+  return h("section", { class: "card", id: "externos" },
+    h("h3", {}, "Pagadores externos"),
+    h("p", { class: "small" }, "Cuenta un alquiler ya liquidado que pagó, directo desde su billetera, alguien que no somos nosotros: la billetera no es nuestra, sus primeros fondos no vinieron de una billetera nuestra y tiene actividad en Celo desde antes del 6 de octubre de 2026. Este sitio lo revisa solo en el explorador público de Celo (Blockscout). Si algo no se puede comprobar, no cuenta. Como no sabemos quién está detrás de cada billetera, figuran como «otro equipo de la hackatón»."),
+    payers.length ? h("table", {}, h("tr", {}, h("th", {}, "Billetera"), h("th", {}, "Pagó el"), h("th", { class: "r" }, "En Celo")),
+      payers.map((p) => h("tr", {},
+        h("td", {}, h("a", { href: LEASE_URL(p.address), rel: "noopener", class: "mono" }, short(p.address)), h("br"),
+          h("span", { class: "tiny" }, "otro equipo de la hackatón", isDayStr(p.firstSeen) ? ` · en Celo desde ${monthName(p.firstSeen.slice(0, 7))}` : "")),
+        h("td", {}, isDayStr(p.date) ? dayFull(p.date) : "—"),
+        h("td", { class: "r" }, h("a", { href: TX_URL(p.tx), rel: "noopener" }, "pago"),
+          typeof p.receipt === "string" && /^\/recibo\/[0-9a-f]{12}\/\d{4}-\d{2}$/.test(p.receipt) ? [h("br"), h("a", { href: p.receipt, "data-link": 1 }, "recibo")] : null))))
+      : h("p", { class: "small muted", style: "margin:0" }, "Todavía ninguno. ", h("a", { href: "/probar" }, "Probalo con un alquiler real de 1.000 wARS"), ": vos sos el propietario, así que la plata te vuelve, menos el 0,3 %."),
+    skipped.length ? [h("h3", { style: "margin-top:16px" }, "Pagos que no contamos"),
+      h("table", {}, skipped.map((r) => h("tr", {},
+        h("td", {}, isAddr(r.address) ? h("span", { class: "mono" }, short(r.address)) : "Billetera nuestra", h("br"), h("span", { class: "tiny" }, REASON_ES[r.reason])),
+        h("td", { class: "r" }, isTx(r.tx) ? h("a", { href: TX_URL(r.tx), rel: "noopener" }, "pago") : "—"))))] : null,
+    h("p", { class: "tiny", style: "margin:10px 0 0" }, isDayStr(o.checkedAt) ? `Revisado: ${o.checkedAt.slice(0, 16).replace("T", " ")} UTC${o.complete ? "" : ", la revisión sigue en curso"}.` : "La revisión todavía no corrió: hasta entonces no contamos a nadie."));
+}
+
+/* ---------- Open test (/probar): the server renders it; this only adds the wallet buttons and waits for the agent ---------- */
+const PROBAR_MSG = {
+  es: { connect: "Usar la billetera de este teléfono", pay: "Pagar 1.000 wARS desde esta billetera", other: (a, b) => `Ojo: estás pagando desde ${a}, pero la plata vuelve a ${b}. Si las dos son tuyas, tocá de nuevo.`, again: "Pagar igual", panel: "Tu panel de propietario, privado: guardá este link. Desde ahí podés retirar los wARS de la cuenta con tu billetera si algo falla.", panelLink: "Abrir mi panel" },
+  en: { connect: "Use this phone's wallet", pay: "Pay 1,000 wARS from this wallet", other: (a, b) => `Careful: you are paying from ${a}, but the money goes back to ${b}. If both are yours, tap again.`, again: "Pay anyway", panel: "Your private landlord panel: keep this link. From there your wallet can withdraw the wARS from the lease account if anything goes wrong.", panelLink: "Open my panel" },
+};
+function probarEnhance(id) {
+  const lang = document.documentElement.lang === "en" ? "en" : "es";
+  const t = PROBAR_MSG[lang];
+  const eth = window.ethereum;
+  const connect = document.getElementById("probar-connect");
+  const input = document.getElementById("wallet");
+  if (connect && input && eth) {
+    connect.replaceChildren(h("button", { class: "btn ghost block", type: "button", onclick: async () => {
+      try {
+        const [a] = await eth.request({ method: "eth_requestAccounts" });
+        if (isAddr(a)) input.value = a;
+      } catch { /* the wallet said no */ }
+    } }, t.connect));
+  }
+  if (!id) return;
+  // The landlord key arrives only in the URL fragment after the form: keep it on this phone, then take it out of the URL.
+  const k = location.hash.match(/k=([0-9a-f]{32})/);
+  const panel = document.getElementById("probar-panel");
+  if (k && panel) {
+    rememberLease(id, k[1], "Prueba abierta de 1.000 wARS");
+    panel.replaceChildren(t.panel, " ", h("a", { href: `/panel/${id}#k=${k[1]}`, rel: "noopener" }, t.panelLink));
+    panel.hidden = false;
+    history.replaceState(null, "", location.pathname + location.search);
+  }
+  let paying = false;
+  const box = document.getElementById("probar-pay");
+  const d = box ? box.dataset : {};
+  if (box && eth && isAddr(d.collector) && isAddr(d.landlord) && /^\d{1,7}$/.test(d.owed || "")) {
+    const status = h("div", {});
+    let warned = false;
+    const btn = h("button", { class: "btn block", type: "button", style: "margin:6px 0 4px", onclick: async () => {
+      if (paying) return;
+      paying = true;
+      try {
+        const [from] = await eth.request({ method: "eth_requestAccounts" });
+        if (!isAddr(from)) throw new Error("no account");
+        if (from.toLowerCase() !== d.landlord.toLowerCase() && !warned) {
+          warned = true;
+          status.replaceChildren(h("div", { class: "note warn" }, t.other(short(from), short(d.landlord))));
+          btn.textContent = t.again;
+          return;
+        }
+        await payWithWallet({ collector: d.collector, current: { amount: Number(d.owed), received: 0 } }, status, PAY_MSG[lang], from);
+      } catch {
+        status.replaceChildren(h("div", { class: "note warn" }, PAY_MSG[lang].fail));
+      } finally {
+        paying = false;
+      }
+    } }, t.pay);
+    box.replaceChildren(btn, status);
+  }
+  // Without a meta refresh while paying, the page reloads itself only when the agent moves the lease to another step.
+  const st = document.getElementById("probar-state");
+  if (st) {
+    const poll = async () => {
+      if (location.pathname !== `/probar/${id}`) return;
+      try {
+        const now = await api(`/api/probar/${id}`);
+        if (!paying && (String(now.step) !== st.dataset.step || now.phase !== st.dataset.phase)) return location.reload();
+      } catch { /* try again */ }
+      setTimeout(poll, 15000);
+    };
+    setTimeout(poll, 15000);
+  }
+}
+function viewProbar(p) {
+  // Server-rendered only: a page reached from inside the app is loaded fresh from the server.
+  if (!hydrating) return location.reload();
+  hydrating = false;
+  const m = p.match(/^\/probar\/([0-9a-f]{12})$/);
+  probarEnhance(m ? m[1] : null);
+}
+
 /* ---------- Router ---------- */
 function route() {
   const p = location.pathname;
@@ -804,6 +920,7 @@ function route() {
   if (p === "/calculadora") return viewCalc();
   if (p === "/nuevo") return viewNew();
   if (p === "/transparencia") return viewTransparency();
+  if (p === "/probar" || /^\/probar\/[0-9a-f]{12}$/.test(p)) return viewProbar(p);
   if ((m = p.match(/^\/pagar\/([0-9a-f]{12})$/))) return viewPay(m[1]);
   if ((m = p.match(/^\/panel\/([0-9a-f]{12})$/))) return viewPanel(m[1]);
   if ((m = p.match(/^\/recibo\/([0-9a-f]{12})\/(\d{4}-\d{2})$/))) return viewReceipt(m[1], m[2]);
