@@ -305,6 +305,7 @@ function enhanceHome() {
   const aEl = q("[data-amt]");
   const refEl = q("[data-ref]");
   const pctEl = q("[data-pct]");
+  const pct2El = q("[data-pct2]");
   const label = q(".mlabel");
   const svg = q(".spark");
   const line = q(".spark .ln");
@@ -316,7 +317,7 @@ function enhanceHome() {
   const cum = [0];
   for (let i = 1; i < xy.length; i++) cum.push(cum[i - 1] + Math.hypot(xy[i][0] - xy[i - 1][0], xy[i][1] - xy[i - 1][1]));
   const total = cum.at(-1);
-  const keep = { label: label.textContent, amt: amt.textContent, f: fEl.textContent, a: aEl.textContent, ref: refEl.textContent, pct: pctEl ? pctEl.textContent : "" };
+  const keep = { label: label.textContent, amt: amt.textContent, f: fEl.textContent, a: aEl.textContent, ref: refEl.textContent, pct: pctEl ? pctEl.textContent : "", pct2: pct2El ? pct2El.textContent : "" };
   const f6 = (n) => new Intl.NumberFormat(LOC, { minimumFractionDigits: 6, maximumFractionDigits: 6 }).format(n);
   const step = 200;
   let timers = [];
@@ -329,6 +330,7 @@ function enhanceHome() {
     amt.textContent = ars(v);
     refEl.textContent = monthShort(months[i]);
     if (pctEl) pctEl.textContent = "+" + pctf((f - 1) * 100);
+    if (pct2El) pct2El.textContent = pctf((f - 1) * 100);
     line.style.strokeDashoffset = String((total - cum[i]) * k);
     dot.style.transform = `translate(${xy[i][0] - xy.at(-1)[0]}px, ${xy[i][1] - xy.at(-1)[1]}px)`;
   }
@@ -339,6 +341,7 @@ function enhanceHome() {
     aEl.textContent = keep.a;
     refEl.textContent = keep.ref;
     if (pctEl) pctEl.textContent = keep.pct;
+    if (pct2El) pct2El.textContent = keep.pct2;
   }
   // The line is drawn with a non-scaling stroke, so its dash pattern is in screen pixels: scale the path length to match.
   let k = 1;
