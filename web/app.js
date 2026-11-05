@@ -345,10 +345,14 @@ function enhanceHome() {
   }
   // The line is drawn with a non-scaling stroke, so its dash pattern is in screen pixels: scale the path length to match.
   let k = 1;
+  let played = false;
   function play() {
     timers.forEach(clearTimeout);
     timers = [];
     k = svg.clientWidth > 0 ? svg.clientWidth / 300 : 1;
+    // The guilloche and its frame print only the first time; a replay re-runs the calculation, the check and the receipt.
+    if (played) stage.classList.add("again");
+    played = true;
     stage.classList.remove("rest", "p-draw", "p-check", "p-paid");
     stage.classList.add("play");
     demo.classList.remove("landed");
@@ -482,8 +486,8 @@ document.addEventListener("click", (e) => {
   try {
     localStorage.setItem("aldia:theme", next);
   } catch { /* not remembered: still switches for this page */ }
-  if (document.startViewTransition && !REDUCED) document.startViewTransition(apply);
-  else apply();
+  // Instant: a view transition here would snapshot the whole page and make the tap feel slow on phones.
+  apply();
 });
 if (window.matchMedia) {
   const mq = matchMedia("(prefers-color-scheme: dark)");
