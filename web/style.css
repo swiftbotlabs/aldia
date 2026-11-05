@@ -94,8 +94,8 @@ svg{flex:none}
 .theme{position:relative}
 .is-dark .top nav .theme svg:first-child{opacity:0;transform:rotate(90deg) scale(.6)}
 .is-dark .top nav .theme svg:last-child{opacity:1;transform:none}
-.top nav a.nav-cta{margin-left:6px;background:var(--cta);color:var(--cta-ink);font-weight:650;padding:0 16px}
-.top nav a.nav-cta:hover{background:var(--cta-hover);color:var(--cta-ink)}
+.top nav a.nav-cta{margin-left:6px;background:var(--cta);color:var(--cta-ink);font-weight:650;padding:0 16px;border:1.5px solid var(--cta)}
+.top nav a.nav-cta:hover{background:var(--cta-hover);border-color:var(--cta-hover);color:var(--cta-ink)}
 .top nav a.nav-hide{display:none}
 
 /* ---------- buttons, seals, notes ---------- */
@@ -541,7 +541,7 @@ footer{border-top:1.5px solid var(--ink);margin-top:0;padding:48px 0 32px;backgr
   .st-text .num{left:-64px}
 }
 @media (min-width:1024px){
-  .hero{min-height:calc(100svh - 64px);display:flex;flex-direction:column;padding:clamp(16px,2.4vh,32px) 0 clamp(16px,2.4vh,28px)}
+  .hero{min-height:calc(100svh - 64px);display:flex;flex-direction:column;padding:clamp(12px,1.6vh,28px) 0 clamp(10px,1.4vh,24px)}
   .hero-grid{flex:1;grid-template-columns:minmax(0,6fr) minmax(0,5fr);column-gap:clamp(40px,5vw,80px);align-items:center;width:100%}
   .hero .metrics{margin-top:clamp(12px,2vh,24px)}
   .hero .metric{padding-top:12px;padding-bottom:10px}
