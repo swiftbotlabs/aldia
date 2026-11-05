@@ -84,6 +84,7 @@ function shell(...content) {
       h("a", { class: "brand", href: U("/") }, LOGO(), "Al Día"),
       h("nav", {}, h("a", { class: "nav-hide", href: U("/transparencia") }, S("Transparencia", "Transparency")), h("a", { href: U("/calculadora") }, S("Calculadora", "Calculator")),
         h("a", { class: "lang", href: otherLang(), hreflang: EN ? "es" : "en", lang: EN ? "es" : "en", title: EN ? "Español" : "English" }, EN ? "ES" : "EN"),
+        themeButton(),
         h("a", { class: "nav-cta", href: U("/probar") }, S("Probar", "Try it"))))),
     h("main", { class: "wrap narrow" }, ...content),
     h("footer", {}, h("div", { class: "wrap" },
@@ -102,7 +103,26 @@ function shell(...content) {
           li(S("Índices: ", "Indices: "), h("a", { href: INDEC_PAGE, rel: "noopener" }, "INDEC"), S(" y ", " and "), h("a", { href: BCRA_PAGE, rel: "noopener" }, "BCRA")),
           li(h("a", { href: ERC8004, rel: "noopener" }, "ERC-8004"))))),
       h("p", { class: "foot-base" }, S("Swift Bot Labs · agente ERC-8004 n.º 10014 en Celo", "Swift Bot Labs · ERC-8004 agent #10014 on Celo")))));
+  themeSync();
   if (!first) window.scrollTo(0, 0);
+}
+// The same button the Worker renders in the header (icons from worker/pages.js ICONS.moon and ICONS.sun).
+function themeButton() {
+  const NS = "http://www.w3.org/2000/svg";
+  const ic = (paths) => {
+    const svg = document.createElementNS(NS, "svg");
+    for (const [k, v] of Object.entries({ viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" })) svg.setAttribute(k, v);
+    for (const d of paths) {
+      const el = document.createElementNS(NS, d.startsWith("c:") ? "circle" : "path");
+      if (d.startsWith("c:")) for (const [k, v] of [["cx", "12"], ["cy", "12"], ["r", "4"]]) el.setAttribute(k, v);
+      else el.setAttribute("d", d);
+      svg.append(el);
+    }
+    return svg;
+  };
+  const b = h("button", { class: "theme", type: "button", id: "theme", "data-dark": S("Usar modo oscuro", "Use dark mode"), "data-light": S("Usar modo claro", "Use light mode"), "aria-label": S("Usar modo oscuro", "Use dark mode") },
+    ic(["M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"]), ic(["c:", "M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"]));
+  return b;
 }
 // A loading placeholder, skipped while the server-rendered page is still on screen.
 function loading(...content) {
@@ -159,7 +179,7 @@ const ICON_CALC = () => {
 };
 function calcEmpty(withExample) {
   return h("div", { class: "card result-empty", id: "calc-empty" }, h("span", { class: "ico" }, ICON_CALC()),
-    h("h3", {}, S("Tu resultado aparece acá", "Your result shows here")),
+    h("h2", { class: "h3" }, S("Tu resultado aparece acá", "Your result shows here")),
     h("p", { class: "small muted" }, S("Poné el alquiler inicial y la fecha de inicio: te mostramos el monto de este mes, cuánto aumentó y de dónde sale el número.", "Enter the starting rent and the start date: you get this month's amount, how much it went up and where the number comes from.")),
     withExample ? h("a", { class: "small", href: "#ejemplo" }, S("Ver un ejemplo resuelto", "See a worked example"), " ↓") : null);
 }
@@ -246,18 +266,39 @@ function calcEnhance() {
   });
 }
 
-/* ---------- Home: the tenant card replays its own calculation from the official monthly IPC ---------- */
-// Each frame is a true statement: starting rent × (IPC of month m ÷ IPC of the base month), month by month over the
-// published series, ending on the amount the agent charged. It runs only if that last frame equals the amount on the card.
+/* ---------- Home ---------- */
+const REDUCED = !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
+// When an element first comes into view (or at once, without IntersectionObserver).
+function onView(el, fn, opts) {
+  if (!el) return;
+  if (!("IntersectionObserver" in window)) return fn();
+  const io = new IntersectionObserver((es) => {
+    if (es.some((e) => e.isIntersecting)) {
+      io.disconnect();
+      fn();
+    }
+  }, opts || { threshold: 0.35 });
+  io.observe(el);
+}
+// The note replays how its amount came about, in stations: the guilloche draws, the official monthly IPC runs month by month
+// (each frame a true statement: starting rent × IPC of month m ÷ IPC of the base month, ending on the amount the agent
+// charged), the clause check lands, then the settled receipt prints out under it. It runs only if the last frame equals the
+// amount on the card; otherwise the stage rests at once on the server-rendered final state.
 function enhanceHome() {
+  const stage = document.getElementById("stage");
+  const rest = () => stage && stage.classList.add("rest");
   const demo = document.getElementById("demo");
-  if (!demo || !demo.dataset.levels) return;
+  homeStory();
+  homeSources();
+  homeCounts();
+  homeThumb();
+  if (!stage || !demo || !demo.dataset.levels || REDUCED) return rest();
   const levels = demo.dataset.levels.split(",").map(Number);
   const months = (demo.dataset.months || "").split(",");
   const base = Number(demo.dataset.base);
   const final = Number(demo.dataset.amount);
   if (levels.length < 2 || levels.length > 40 || months.length !== levels.length || !levels.every((v) => Number.isFinite(v) && v > 0) ||
-    !months.every((m) => /^\d{4}-\d{2}$/.test(m)) || !Number.isInteger(base) || Math.floor(base * (levels.at(-1) / levels[0]) + 0.5) !== final) return;
+    !months.every((m) => /^\d{4}-\d{2}$/.test(m)) || !Number.isInteger(base) || Math.floor(base * (levels.at(-1) / levels[0]) + 0.5) !== final) return rest();
   const q = (sel) => demo.querySelector(sel);
   const amt = q(".amount");
   const fEl = q("[data-f]");
@@ -269,17 +310,17 @@ function enhanceHome() {
   const line = q(".spark .ln");
   const dot = q(".spark .pt.end");
   const btn = document.getElementById("replay");
-  if (!amt || !fEl || !aEl || !refEl || !label || !svg || !line || !dot || !btn) return;
-  if (window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  if (!amt || !fEl || !aEl || !refEl || !label || !svg || !line || !dot || !btn) return rest();
   const xy = (svg.dataset.xy || "").split(" ").map((p) => p.split(",").map(Number));
-  if (xy.length !== levels.length || !xy.every((p) => p.length === 2 && p.every(Number.isFinite))) return;
+  if (xy.length !== levels.length || !xy.every((p) => p.length === 2 && p.every(Number.isFinite))) return rest();
   const cum = [0];
   for (let i = 1; i < xy.length; i++) cum.push(cum[i - 1] + Math.hypot(xy[i][0] - xy[i - 1][0], xy[i][1] - xy[i - 1][1]));
   const total = cum.at(-1);
   const keep = { label: label.textContent, amt: amt.textContent, f: fEl.textContent, a: aEl.textContent, ref: refEl.textContent, pct: pctEl ? pctEl.textContent : "" };
   const f6 = (n) => new Intl.NumberFormat(LOC, { minimumFractionDigits: 6, maximumFractionDigits: 6 }).format(n);
-  const step = 190;
+  const step = 200;
   let timers = [];
+  const at = (ms, fn) => timers.push(setTimeout(fn, ms));
   function frame(i) {
     const f = levels[i] / levels[0];
     const v = Math.floor(base * f + 0.5);
@@ -288,47 +329,162 @@ function enhanceHome() {
     amt.textContent = ars(v);
     refEl.textContent = monthShort(months[i]);
     if (pctEl) pctEl.textContent = "+" + pctf((f - 1) * 100);
-    line.style.strokeDashoffset = String(total - cum[i]);
+    line.style.strokeDashoffset = String((total - cum[i]) * k);
     dot.style.transform = `translate(${xy[i][0] - xy.at(-1)[0]}px, ${xy[i][1] - xy.at(-1)[1]}px)`;
   }
+  function settle() {
+    label.textContent = keep.label;
+    amt.textContent = keep.amt;
+    fEl.textContent = keep.f;
+    aEl.textContent = keep.a;
+    refEl.textContent = keep.ref;
+    if (pctEl) pctEl.textContent = keep.pct;
+  }
+  // The line is drawn with a non-scaling stroke, so its dash pattern is in screen pixels: scale the path length to match.
+  let k = 1;
   function play() {
     timers.forEach(clearTimeout);
     timers = [];
+    k = svg.clientWidth > 0 ? svg.clientWidth / 300 : 1;
+    stage.classList.remove("rest", "p-draw", "p-check", "p-paid");
+    stage.classList.add("play");
     demo.classList.remove("landed");
     line.style.transition = "none";
     dot.style.transition = "none";
-    line.style.strokeDasharray = String(total);
+    line.style.strokeDasharray = String(total * k);
     label.textContent = S("Recalculando con el IPC del INDEC…", "Recalculating from INDEC's IPC…");
     frame(0);
-    // Turn the transitions back on only after the reset has painted, without forcing a synchronous layout.
+    // Transitions come back on only after the reset has painted, without forcing a synchronous layout.
     requestAnimationFrame(() => requestAnimationFrame(() => {
+      stage.classList.add("p-draw");
       line.style.transition = `stroke-dashoffset ${step}ms linear`;
       dot.style.transition = `transform ${step}ms linear`;
     }));
-    for (let i = 1; i < levels.length; i++) timers.push(setTimeout(() => frame(i), 300 + (i - 1) * step));
-    timers.push(setTimeout(() => {
-      label.textContent = keep.label;
-      amt.textContent = keep.amt;
-      fEl.textContent = keep.f;
-      aEl.textContent = keep.a;
-      refEl.textContent = keep.ref;
-      if (pctEl) pctEl.textContent = keep.pct;
+    const t0 = 420;
+    for (let i = 1; i < levels.length; i++) at(t0 + (i - 1) * step, () => frame(i));
+    const tEnd = t0 + (levels.length - 1) * step + 80;
+    at(tEnd, () => {
+      settle();
       demo.classList.add("landed");
-      timers.push(setTimeout(() => demo.classList.remove("landed"), 1400));
-    }, 300 + (levels.length - 1) * step + 60));
+    });
+    at(tEnd + 260, () => stage.classList.add("p-check"));
+    at(tEnd + 620, () => stage.classList.add("p-paid"));
+    at(tEnd + 1900, () => {
+      stage.classList.add("rest");
+      stage.classList.remove("play", "p-draw", "p-check", "p-paid");
+      line.style.transition = "none";
+      line.style.strokeDasharray = "";
+      line.style.strokeDashoffset = "";
+      demo.classList.remove("landed");
+    });
   }
   btn.hidden = false;
   btn.addEventListener("click", play);
-  // Play once when the card is on screen.
-  if ("IntersectionObserver" in window) {
-    const io = new IntersectionObserver((es) => {
-      if (es.some((e) => e.isIntersecting)) {
-        io.disconnect();
-        setTimeout(play, 500);
-      }
-    }, { threshold: 0.6 });
-    io.observe(demo);
+  // The note is on the first screen: it plays once right away, and Recalcular plays it again.
+  setTimeout(play, 250);
+}
+// How it works: each step's picture fills in the first time the step is in view, and the step in view is marked.
+function homeStory() {
+  const steps = [...document.querySelectorAll(".story .st")];
+  if (!steps.length) return;
+  if (REDUCED || !("IntersectionObserver" in window)) return steps.forEach((s) => s.classList.add("seen"));
+  document.documentElement.classList.add("steps-on");
+  const io = new IntersectionObserver((es) => {
+    for (const e of es) {
+      if (e.isIntersecting) e.target.classList.add("seen", "on");
+      else e.target.classList.remove("on");
+    }
+  }, { rootMargin: "-30% 0px -40% 0px" });
+  steps.forEach((s) => io.observe(s));
+}
+// The sources diagram sends three pulses down its wires when it comes into view, and again on hover or tap.
+function homeSources() {
+  const panel = document.getElementById("diagram");
+  const wires = panel && panel.querySelector(".wires");
+  if (!wires || REDUCED) return;
+  let busy = false;
+  const run = () => {
+    if (busy) return;
+    busy = true;
+    wires.classList.remove("run");
+    requestAnimationFrame(() => requestAnimationFrame(() => wires.classList.add("run")));
+    setTimeout(() => (busy = false), 1200);
+  };
+  onView(panel, run, { threshold: 0.4 });
+  panel.addEventListener("pointerenter", run);
+  panel.addEventListener("click", run);
+}
+// True counts count up once, from zero, when they come into view.
+function homeCounts() {
+  if (REDUCED) return;
+  for (const el of document.querySelectorAll("[data-count]")) {
+    const n = Number(el.dataset.count);
+    if (!Number.isInteger(n) || n < 2 || n > 1e6) continue;
+    onView(el, () => {
+      const t0 = performance.now();
+      const dur = 700;
+      const tick = (t) => {
+        const k = Math.min(1, (t - t0) / dur);
+        el.textContent = String(Math.round(n * (1 - Math.pow(1 - k, 3))));
+        if (k < 1) requestAnimationFrame(tick);
+        else el.textContent = String(n);
+      };
+      requestAnimationFrame(tick);
+    }, { threshold: 1 });
   }
+}
+// On a phone, the main action rides at the bottom of the screen whenever the hero's own buttons are out of view, and steps
+// aside at the closing offer, which carries the same button.
+function homeThumb() {
+  const bar = document.getElementById("thumbbar");
+  const ctas = document.getElementById("hero-ctas");
+  if (!bar || !ctas || !("IntersectionObserver" in window)) return;
+  const end = document.querySelector(".close-band");
+  let ctasSeen = false;
+  let atEnd = false;
+  const sync = () => bar.classList.toggle("show", !ctasSeen && !atEnd);
+  new IntersectionObserver((es) => {
+    ctasSeen = es.some((e) => e.isIntersecting);
+    sync();
+  }).observe(ctas);
+  if (end) new IntersectionObserver((es) => {
+    atEnd = es.some((e) => e.isIntersecting);
+    sync();
+  }).observe(end);
+}
+
+/* ---------- Theme: light or dark, remembered on this device (web/theme.js applies it before the page paints) ---------- */
+function themeNow() {
+  const set = document.documentElement.getAttribute("data-theme");
+  if (set === "dark" || set === "light") return set;
+  return window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+function themeSync() {
+  const dark = themeNow() === "dark";
+  document.documentElement.classList.toggle("is-dark", dark);
+  const b = document.getElementById("theme");
+  if (!b) return;
+  b.hidden = false;
+  b.setAttribute("aria-label", dark ? b.dataset.light : b.dataset.dark);
+  b.title = b.getAttribute("aria-label");
+}
+document.addEventListener("click", (e) => {
+  const b = e.target && e.target.closest && e.target.closest("#theme");
+  if (!b) return;
+  const next = themeNow() === "dark" ? "light" : "dark";
+  const apply = () => {
+    document.documentElement.setAttribute("data-theme", next);
+    themeSync();
+  };
+  try {
+    localStorage.setItem("aldia:theme", next);
+  } catch { /* not remembered: still switches for this page */ }
+  if (document.startViewTransition && !REDUCED) document.startViewTransition(apply);
+  else apply();
+});
+if (window.matchMedia) {
+  const mq = matchMedia("(prefers-color-scheme: dark)");
+  if (mq.addEventListener) mq.addEventListener("change", themeSync);
 }
 
 /* ---------- New lease ---------- */
@@ -880,6 +1036,7 @@ function route() {
   if (/^\/recibo\/[0-9a-f]{12}\/\d{4}-\d{2}$/.test(p)) return serverPage(enhanceReceipt);
   return serverPage(null);
 }
+themeSync();
 window.addEventListener("popstate", () => {
   fromHistory = true;
   route();

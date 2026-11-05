@@ -184,7 +184,7 @@ export async function probarState(env, id, { judge = true } = {}) {
 }
 
 /* ---------- pages ---------- */
-const stepCard = (n, title, chip, body) => html`<section class="card"><div class="fh"><span class="num">${n}</span><h3>${title}</h3>${chip}</div>${body}</section>`;
+const stepCard = (n, title, chip, body) => html`<section class="card"><div class="fh"><span class="num">${n}</span><h2 class="h3">${title}</h2>${chip}</div>${body}</section>`;
 const chip = (t, kind) => html`<span class="chip ${kind}">${t}</span>`;
 function countBox(lang, o) {
   const t = T[lang];
@@ -197,9 +197,9 @@ export async function pageProbar(env, url, waitUntil, { error = null, value = ""
   const o = cleanOutside(await outsideSummary(env, waitUntil));
   const en = lang === "en";
   const body = html`<div class="cols probar"><div class="stack"><div class="phead"><p class="kicker">${en ? "Open test · Celo mainnet" : "Prueba abierta · red principal de Celo"}</p><h1>${t.h1}</h1><p>${t.lead}</p></div>
-<form class="card" id="probar-form" method="post" action="/probar${q(lang)}"><div class="fh"><span class="num">1</span><h3>${t.s1}</h3></div><input type="hidden" name="lang" value="${lang}"><div id="probar-connect" data-lang="${lang}"></div><label for="wallet">${t.walletLabel}<span class="hint">${t.walletHint}</span></label><input id="wallet" name="wallet" class="mono" autocomplete="off" spellcheck="false" autocapitalize="off" inputmode="text" maxlength="42" placeholder="0x…" required pattern="0x[0-9a-fA-F]{40}" value="${str(value, 60)}">${
+<form class="card" id="probar-form" method="post" action="/probar${q(lang)}"><div class="fh"><span class="num">1</span><h2 class="h3">${t.s1}</h2></div><input type="hidden" name="lang" value="${lang}"><div id="probar-connect" data-lang="${lang}"></div><label for="wallet">${t.walletLabel}<span class="hint">${t.walletHint}</span></label><input id="wallet" name="wallet" class="mono" autocomplete="off" spellcheck="false" autocapitalize="off" inputmode="text" maxlength="42" placeholder="0x…" required pattern="0x[0-9a-fA-F]{40}" value="${str(value, 60)}">${
     error ? html`<div class="note err" style="margin:12px 0 0">${t.err[error] || t.err.form}</div>` : ""}<button class="btn block" type="submit" style="margin-top:16px">${t.create}</button></form>
-<section class="card"><h3>${t.needH}</h3><p class="small">${t.need}</p><p class="small" style="margin:0"><a href="${SWAP}" rel="noopener">${t.swap}</a> (Celo).</p></section></div>
+<section class="card"><h2 class="h3">${t.needH}</h2><p class="small">${t.need}</p><p class="small" style="margin:0"><a href="${SWAP}" rel="noopener">${t.swap}</a> (Celo).</p></section></div>
 <aside class="stack"><section class="card"><p class="aside-h">${en ? "What happens next" : "Qué pasa después"}</p><ol class="vsteps">${[[2, t.s2, t.s2t], [3, t.s3, t.s3t], [4, t.s4, t.s4t]].map(([n, h, p]) => html`<li><span class="num">${n}</span><div><h3>${h}</h3><p class="muted small">${p}</p></div></li>`)}</ol></section>
 ${countBox(lang, o)}<section class="card"><h3>${t.ruleH}</h3><p class="small">${t.rule}</p><p class="tiny" style="margin:0">${t.limits}</p></section></aside></div>`;
   return {

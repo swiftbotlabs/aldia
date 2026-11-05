@@ -111,7 +111,7 @@ function plainPage(p, wantTitle) {
   assert.ok(p.csp && p.csp.includes("script-src 'self'") && !p.csp.includes("unsafe-eval"), "CSP unchanged on rendered pages");
   assert.strictEqual((p.body.match(/<title>([^<]*)<\/title>/) || [])[1], wantTitle);
   assert.ok((meta(p.body, "description") || "").length > 40, "a real meta description");
-  for (const tag of p.body.match(/<script\b[^>]*>/g) || []) assert.match(tag, /\bsrc="\/(rent|app)\.js"/, "no inline scripts");
+  for (const tag of p.body.match(/<script\b[^>]*>/g) || []) assert.match(tag, /\bsrc="\/(rent|app|theme)\.js"/, "no inline scripts");
   assert.ok(!/necesita JavaScript/.test(p.body), "no JavaScript-only shell");
 }
 const fx = (k) => fixtures[k];
@@ -351,7 +351,7 @@ for (const [u, title, wants] of EN_PAGES) {
   for (const w of wants) assert.ok(t.includes(w), `${u} shows: ${w}`);
   for (const w of SPANISH) assert.ok(!t.includes(w), `${u} has no Spanish: ${w}`);
   // every internal link keeps the language, except the toggle back to Spanish and the data/asset files
-  const internal = [...p.body.matchAll(/href="(\/[^"]*)"/g)].map((x) => x[1]).filter((h) => !/^\/(api\/|llms\.txt|logo\.svg|style\.css)/.test(h));
+  const internal = [...p.body.matchAll(/href="(\/[^"]*)"/g)].map((x) => x[1]).filter((h) => !/^\/(api\/|llms\.txt|logo\.svg|guilloche\.svg|style\.css)/.test(h));
   const toggle = (p.body.match(/<a class="lang" href="([^"]*)"/) || [])[1];
   assert.ok(toggle && !toggle.includes("lang=en"), u + " has a toggle back to Spanish");
   const lost = internal.filter((h) => h !== toggle && !/[?&]lang=en(#|&|$)/.test(h.replaceAll("&amp;", "&")));

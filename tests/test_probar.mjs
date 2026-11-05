@@ -155,7 +155,7 @@ let ipN = 0;
 const form = (fields, headers = {}) => call("/probar", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", "cf-connecting-ip": headers.ip || `198.51.100.${++ipN}`, ...headers }, body: new URLSearchParams(fields).toString(), redirect: "manual" });
 const text = async (r) => r.text();
 const strip = (b) => b.replace(/<script[\s\S]*?<\/script>/g, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
-const noScripts = (b) => (b.match(/<script\b[^>]*>/g) || []).every((t) => /\bsrc="\/(rent|app)\.js"/.test(t));
+const noScripts = (b) => (b.match(/<script\b[^>]*>/g) || []).every((t) => /\bsrc="\/(rent|app|theme)\.js"/.test(t));
 const today = new Date().toISOString().slice(0, 10);
 
 // The page itself, with no JavaScript and no outside payer yet
