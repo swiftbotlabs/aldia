@@ -184,23 +184,24 @@ export async function probarState(env, id, { judge = true } = {}) {
 }
 
 /* ---------- pages ---------- */
-const stepCard = (n, title, chip, body) => html`<section class="card"><div class="row" style="justify-content:space-between;align-items:center"><span class="num" style="margin:0">${n}</span>${chip}</div><h3 style="margin-top:8px">${title}</h3>${body}</section>`;
+const stepCard = (n, title, chip, body) => html`<section class="card"><div class="fh"><span class="num">${n}</span><h3>${title}</h3>${chip}</div>${body}</section>`;
 const chip = (t, kind) => html`<span class="chip ${kind}">${t}</span>`;
 function countBox(lang, o) {
   const t = T[lang];
-  return html`<section class="stat" style="margin:0 0 14px;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px"><b style="display:inline;font-size:1.9rem;line-height:1">${o.count}</b><span>${t.payersLabel(o.count)}</span><a class="small" href="/transparencia${q(lang)}#externos" style="margin-left:auto">${t.seeList}</a></section>`;
+  return html`<section class="stat countbox"><b>${o.count}</b><span>${t.payersLabel(o.count)}</span><a class="small" href="/transparencia${q(lang)}#externos">${t.seeList}</a></section>`;
 }
 
 export async function pageProbar(env, url, waitUntil, { error = null, value = "", status = 200 } = {}) {
   const lang = langOf(url);
   const t = T[lang];
   const o = cleanOutside(await outsideSummary(env, waitUntil));
-  const body = html`<h1>${t.h1}</h1><p class="muted">${t.lead}</p>
-<form class="card" id="probar-form" method="post" action="/probar${q(lang)}"><div class="row" style="justify-content:space-between;align-items:center"><span class="num" style="margin:0">1</span></div><h3 style="margin-top:8px">${t.s1}</h3><input type="hidden" name="lang" value="${lang}"><div id="probar-connect" data-lang="${lang}"></div><label for="wallet">${t.walletLabel}<span class="hint">${t.walletHint}</span></label><input id="wallet" name="wallet" class="mono" autocomplete="off" spellcheck="false" autocapitalize="off" inputmode="text" maxlength="42" placeholder="0x…" required pattern="0x[0-9a-fA-F]{40}" value="${str(value, 60)}">${
-    error ? html`<div class="note err" style="margin:12px 0 0">${t.err[error] || t.err.form}</div>` : ""}<button class="btn block" type="submit" style="margin-top:14px">${t.create}</button></form>
-<section class="steps" aria-label="${t.s1}">${[[2, t.s2, t.s2t], [3, t.s3, t.s3t], [4, t.s4, t.s4t]].map(([n, h, p]) => html`<div class="card"><span class="num">${n}</span><h3>${h}</h3><p class="muted small" style="margin:0">${p}</p></div>`)}</section>
-<section class="card"><h3>${t.needH}</h3><p class="small">${t.need}</p><p class="small" style="margin:0"><a href="${SWAP}" rel="noopener">${t.swap}</a> (Celo).</p></section>
-${countBox(lang, o)}<section class="card"><h3>${t.ruleH}</h3><p class="small">${t.rule}</p><p class="tiny" style="margin:0">${t.limits}</p></section>`;
+  const en = lang === "en";
+  const body = html`<div class="cols probar"><div class="stack"><div class="phead"><p class="kicker">${en ? "Open test · Celo mainnet" : "Prueba abierta · red principal de Celo"}</p><h1>${t.h1}</h1><p>${t.lead}</p></div>
+<form class="card" id="probar-form" method="post" action="/probar${q(lang)}"><div class="fh"><span class="num">1</span><h3>${t.s1}</h3></div><input type="hidden" name="lang" value="${lang}"><div id="probar-connect" data-lang="${lang}"></div><label for="wallet">${t.walletLabel}<span class="hint">${t.walletHint}</span></label><input id="wallet" name="wallet" class="mono" autocomplete="off" spellcheck="false" autocapitalize="off" inputmode="text" maxlength="42" placeholder="0x…" required pattern="0x[0-9a-fA-F]{40}" value="${str(value, 60)}">${
+    error ? html`<div class="note err" style="margin:12px 0 0">${t.err[error] || t.err.form}</div>` : ""}<button class="btn block" type="submit" style="margin-top:16px">${t.create}</button></form>
+<section class="card"><h3>${t.needH}</h3><p class="small">${t.need}</p><p class="small" style="margin:0"><a href="${SWAP}" rel="noopener">${t.swap}</a> (Celo).</p></section></div>
+<aside class="stack"><section class="card"><p class="aside-h">${en ? "What happens next" : "Qué pasa después"}</p><ol class="vsteps">${[[2, t.s2, t.s2t], [3, t.s3, t.s3t], [4, t.s4, t.s4t]].map(([n, h, p]) => html`<li><span class="num">${n}</span><div><h3>${h}</h3><p class="muted small">${p}</p></div></li>`)}</ol></section>
+${countBox(lang, o)}<section class="card"><h3>${t.ruleH}</h3><p class="small">${t.rule}</p><p class="tiny" style="margin:0">${t.limits}</p></section></aside></div>`;
   return {
     status, lang,
     title: t.title,
@@ -252,7 +253,7 @@ export async function pageProbarLease(env, url, id, waitUntil) {
     : html`<p class="small muted" style="margin:0">${t.later4}</p>`);
   const unjudged = st.phase === "paid" && !st.builderTest && !st.verdicts.some((v) => v.reason !== "unchecked");
   const waiting = st.phase === "preparing" || st.phase === "settling" || st.phase === "waiting" || unjudged;
-  const body = html`<h1>${t.leaseH1}</h1><div id="probar-state" data-id="${id}" data-step="${st.step}" data-phase="${st.phase}" hidden></div><p id="probar-panel" class="small" hidden></p>${st.builderTest ? html`<div class="note warn">${t.ourTest}</div>` : ""}${s1}${s2}${s3}${s4}${countBox(lang, o)}<p class="small"><a href="/probar${q(lang)}">${t.back}</a></p>`;
+  const body = html`<div class="phead"><h1>${t.leaseH1}</h1></div><div id="probar-state" data-id="${id}" data-step="${st.step}" data-phase="${st.phase}" hidden></div><p id="probar-panel" class="small" hidden></p>${st.builderTest ? html`<div class="note warn">${t.ourTest}</div>` : ""}<div class="cols r4"><div class="stack">${s1}${s2}${s3}${s4}</div><aside class="stack">${countBox(lang, o)}<p class="small"><a href="/probar${q(lang)}">${t.back}</a></p></aside></div>`;
   return { status: 200, lang, noindex: true, refresh: waiting ? 20 : 0, title: t.leaseTitle, description: `${t.lead}`, body };
 }
 

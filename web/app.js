@@ -9,6 +9,8 @@ const TX_URL = (t) => `https://celoscan.io/tx/${t}`;
 const INDEC_PAGE = "https://www.indec.gob.ar/indec/web/Nivel4-Tema-3-5-31";
 const BCRA_PAGE = "https://www.bcra.gob.ar/estadisticas-indicadores/";
 const REPO = "https://github.com/swiftbotlabs/aldia";
+const VIDEO = "https://youtu.be/DmCQoeQxLME";
+const ERC8004 = "https://8004scan.io/agents/celo/10014";
 const app = document.getElementById("app");
 const SAMPLE_TENANT = "c658d0b11729"; // the builder-test lease the calculator's worked example recomputes
 // The Worker sends each page already rendered. The first view replaces it in place, without a "Cargando…" flash.
@@ -71,24 +73,35 @@ async function indices() {
   return idxCache;
 }
 
-// The same header and footer the Worker renders, for the pages this file draws itself.
+// The same header and footer the Worker renders (worker/pages.js layout), for the pages this file draws itself.
+const LOGO = () => h("img", { src: "/logo.svg", alt: "", width: "28", height: "28" });
 function shell(...content) {
   const first = hydrating;
   hydrating = false;
+  const li = (...k) => h("li", {}, ...k);
   app.replaceChildren(
-    h("header", { class: "top" },
-      h("a", { class: "brand", href: U("/") }, h("img", { src: "/logo.svg", alt: "" }), "Al Día"),
-      h("nav", {}, h("a", { href: U("/probar") }, S("Probar", "Try it")), h("a", { href: U("/calculadora") }, S("Calculadora", "Calculator")),
-        h("a", { class: "lang", href: otherLang(), hreflang: EN ? "es" : "en", lang: EN ? "es" : "en", title: EN ? "Español" : "English" }, EN ? "ES" : "EN"))),
-    h("main", { class: "wrap" }, ...content),
+    h("header", { class: "top" }, h("div", { class: "wrap" },
+      h("a", { class: "brand", href: U("/") }, LOGO(), "Al Día"),
+      h("nav", {}, h("a", { class: "nav-hide", href: U("/transparencia") }, S("Transparencia", "Transparency")), h("a", { href: U("/calculadora") }, S("Calculadora", "Calculator")),
+        h("a", { class: "lang", href: otherLang(), hreflang: EN ? "es" : "en", lang: EN ? "es" : "en", title: EN ? "Español" : "English" }, EN ? "ES" : "EN"),
+        h("a", { class: "nav-cta", href: U("/probar") }, S("Probar", "Try it"))))),
+    h("main", { class: "wrap narrow" }, ...content),
     h("footer", {}, h("div", { class: "wrap" },
-      h("p", {}, S("Al Día es un producto de Swift Bot Labs. No somos una inmobiliaria ni un banco, y este sitio no reemplaza tu contrato ni un asesoramiento legal o impositivo.",
-        "Al Día is a Swift Bot Labs product. We are not an estate agent or a bank, and this site does not replace your contract or legal or tax advice.")),
-      h("p", {}, h("a", { href: U("/transparencia") }, S("Transparencia", "Transparency")), " · ",
-        h("a", { href: U("/probar") }, S("Probalo con 1.000 wARS", "Try it with 1,000 wARS")), " · ",
-        h("a", { href: U("/nuevo") }, S("Cargar contrato", "Load a lease")), " · ",
-        h("a", { href: REPO, rel: "noopener" }, S("Código abierto", "Open source")), S(" · Índices: ", " · Indices: "),
-        h("a", { href: INDEC_PAGE, rel: "noopener" }, "INDEC"), S(" y ", " and "), h("a", { href: BCRA_PAGE, rel: "noopener" }, "BCRA")))));
+      h("div", { class: "foot" },
+        h("div", {}, h("a", { class: "brand", href: U("/") }, LOGO(), "Al Día"),
+          h("p", {}, S("Al Día es un producto de Swift Bot Labs. No somos una inmobiliaria ni un banco, y este sitio no reemplaza tu contrato ni un asesoramiento legal o impositivo.",
+            "Al Día is a Swift Bot Labs product. We are not an estate agent or a bank, and this site does not replace your contract or legal or tax advice."))),
+        h("div", {}, h("h4", {}, S("Producto", "Product")), h("ul", {},
+          li(h("a", { href: U("/probar") }, S("Probalo con 1.000 wARS", "Try it with 1,000 wARS"))),
+          li(h("a", { href: U("/calculadora") }, S("Calculadora", "Calculator"))),
+          li(h("a", { href: U("/nuevo") }, S("Cargar contrato", "Load a lease"))),
+          li(h("a", { href: U("/transparencia") }, S("Transparencia", "Transparency"))))),
+        h("div", {}, h("h4", {}, S("Fuentes y código", "Sources and code")), h("ul", {},
+          li(h("a", { href: REPO, rel: "noopener" }, S("Código abierto", "Open source"))),
+          li(h("a", { href: VIDEO, rel: "noopener" }, "Video (1:34)")),
+          li(S("Índices: ", "Indices: "), h("a", { href: INDEC_PAGE, rel: "noopener" }, "INDEC"), S(" y ", " and "), h("a", { href: BCRA_PAGE, rel: "noopener" }, "BCRA")),
+          li(h("a", { href: ERC8004, rel: "noopener" }, "ERC-8004"))))),
+      h("p", { class: "foot-base" }, S("Swift Bot Labs · agente ERC-8004 n.º 10014 en Celo", "Swift Bot Labs · ERC-8004 agent #10014 on Celo")))));
   if (!first) window.scrollTo(0, 0);
 }
 // A loading placeholder, skipped while the server-rendered page is still on screen.
@@ -129,53 +142,38 @@ function explainRent(r) {
     r.index === "ICL" ? h("p", { class: "small muted", style: "margin-top:10px" }, S("Fuente: ", "Source: "), h("a", { href: BCRA_PAGE, rel: "noopener" }, S("BCRA, Índice para Contratos de Locación", "BCRA, rental contracts index (ICL)")), ".") : null);
 }
 
-// The worked example: the sample tenant's IPC rent recomputed from the official series. Same as worker/pages.js.
-function workedExample(pub, idx) {
-  if (!pub || pub.builderTest !== true || !pub.current || !idx || !idx.ipc) return null;
-  const d = pub.current.detail;
-  const terms = termsFromDetail(d, pub.periodMonths);
-  if (!terms) return null;
-  const r = rentForMonth(terms, d.month, idx);
-  if (!r || r.missing || !r.refFrom || !r.refTo) return null;
-  const from = idx.ipc[r.refFrom];
-  const to = idx.ipc[r.refTo];
-  if (!Number.isFinite(from) || !Number.isFinite(to)) return null;
-  return { terms, r, from, to, factor: to / from, agent: Number.isFinite(pub.current.amount) ? pub.current.amount : null, label: pub.propertyLabel };
+// The calculator page is rendered by the Worker as a plain GET form (works without JavaScript). Here it only becomes
+// live: every edit recomputes in place into #calc-out, with the same markup the Worker draws (worker/pages.js calcResult,
+// calcEmpty), so nothing on the page moves when the script takes over. The form and the worked example are not redrawn.
+const monthShort = (ym) => new Intl.DateTimeFormat(LOC, { month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(ym + "-15T00:00:00Z")).replace(".", "");
+const ICON_CALC = () => {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  for (const [k, v] of Object.entries({ viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" })) svg.setAttribute(k, v);
+  const r = document.createElementNS(ns, "rect");
+  for (const [k, v] of Object.entries({ x: "4", y: "2", width: "16", height: "20", rx: "2" })) r.setAttribute(k, v);
+  const p = document.createElementNS(ns, "path");
+  p.setAttribute("d", "M8 6h8M8 11h2M14 11h2M8 15h2M14 15h2M8 19h2M14 19h2");
+  svg.append(r, p);
+  return svg;
+};
+function calcEmpty(withExample) {
+  return h("div", { class: "card result-empty", id: "calc-empty" }, h("span", { class: "ico" }, ICON_CALC()),
+    h("h3", {}, S("Tu resultado aparece acá", "Your result shows here")),
+    h("p", { class: "small muted" }, S("Poné el alquiler inicial y la fecha de inicio: te mostramos el monto de este mes, cuánto aumentó y de dónde sale el número.", "Enter the starting rent and the start date: you get this month's amount, how much it went up and where the number comes from.")),
+    withExample ? h("a", { class: "small", href: "#ejemplo" }, S("Ver un ejemplo resuelto", "See a worked example"), " ↓") : null);
 }
-const level = (n) => new Intl.NumberFormat(LOC, { maximumFractionDigits: 4 }).format(n);
-const factor6 = (n) => new Intl.NumberFormat(LOC, { minimumFractionDigits: 6, maximumFractionDigits: 6 }).format(n);
-function exampleCard(ex) {
-  if (!ex) return null;
-  const { terms, r, from, to, factor, agent, label } = ex;
-  const period = (PERIODS.find(([n]) => n === terms.periodMonths) || [0, ""])[1].toLowerCase();
-  return h("section", { class: "card", id: "ejemplo" },
-    h("h2", {}, S("Ejemplo resuelto", "Worked example")),
-    h("p", { class: "small muted" }, S("El ", "The "), h("a", { href: U(`/pagar/${SAMPLE_TENANT}`) }, S("contrato de prueba", "test lease")), S(` «${label}», con los datos que publica el agente, recalculado acá con los índices oficiales.`, ` «${label}», from the data the agent publishes, recomputed here from the official indices.`)),
-    h("dl", { class: "kv" },
-      h("dt", {}, S("Alquiler inicial", "Starting rent")), h("dd", {}, ars(terms.baseRent)),
-      h("dt", {}, S("Inicio del contrato", "Lease start")), h("dd", {}, monthName(terms.startDate.slice(0, 7))),
-      h("dt", {}, S("Índice", "Index")), h("dd", {}, `${INDEX_NAMES.IPC}, ${period}`),
-      h("dt", {}, S("Alquiler de", "Rent for")), h("dd", {}, monthName(r.month))),
-    h("p", { class: "small", style: "margin:12px 0 4px" }, `${S("IPC de", "IPC")} ${monthName(r.refTo)}: ${level(to)}`, h("br"), `${S("IPC de", "IPC")} ${monthName(r.refFrom)}: ${level(from)}`),
-    h("p", { class: "small", style: "margin:0 0 4px" }, `${level(to)} ÷ ${level(from)} = ${factor6(factor)}`),
-    h("p", { class: "small", style: "margin:0" }, `${ars(terms.baseRent)} × ${factor6(factor)} = `, h("b", {}, ars(r.amount)), S(", redondeado al peso.", ", rounded to the peso.")),
+function calcResultCard(lease, idx) {
+  const m = nowMonth();
+  const r = rentForMonth(lease, m, idx);
+  if (!r) return [h("div", { class: "note" }, S("El contrato todavía no empezó.", "The lease has not started yet.")), false];
+  const next = addMonths(r.adjustmentMonth, lease.periodMonths);
+  return [h("div", { class: "card", id: "calc-result" },
+    h("div", { class: "muted small" }, S(`Alquiler de ${monthName(m)}`, `Rent for ${monthName(m)}`)),
+    r.missing ? null : h("div", { class: "amount" }, ars(r.amount)),
     explainRent(r),
-    agent === null ? null : h("p", { class: "small", style: "margin:12px 0 0" },
-      agent === r.amount ? S(`El agente cobró ${ars(agent)} en ese contrato: coincide.`, `The agent charged ${ars(agent)} on that lease: it matches.`) : S(`El agente publicó ${ars(agent)} para ese mes.`, `The agent published ${ars(agent)} for that month.`)));
-}
-
-// Inputs can come from the query string: the server-rendered form is a plain GET form that works without JavaScript.
-function calcStart() {
-  const q = new URLSearchParams(location.search);
-  const inicio = q.get("inicio") || "";
-  return {
-    baseRent: (q.get("alquiler") || "").slice(0, 20),
-    startDate: /^\d{4}-\d{2}-\d{2}$/.test(inicio) ? inicio : "",
-    index: ["IPC", "ICL", "FIJO"].includes(q.get("indice")) ? q.get("indice") : "IPC",
-    periodMonths: [1, 2, 3, 4, 6, 12].includes(+q.get("cada")) ? +q.get("cada") : 3,
-    lagMonths: [1, 2].includes(+q.get("meses")) ? +q.get("meses") : 2,
-    fixedPct: (q.get("pct") || "").slice(0, 8),
-  };
+    h("p", { class: "muted small", style: "margin-top:12px" }, `${S("Próximo aumento", "Next increase")}: ${monthName(next)}.`),
+    h("a", { class: "btn block", href: U("/nuevo") }, S("Que se haga solo todos los meses", "Have it done for you every month"))), true];
 }
 
 // Anonymous use count: once per index type per page load, 2 s after a result settles, the calculator tells the Worker
@@ -194,64 +192,143 @@ function calcPing(index) {
   }, 2000);
 }
 
-async function viewCalc() {
-  document.title = S("Calculadora de aumento de alquiler · Al Día", "Rent increase calculator · Al Día");
-  const s = calcStart();
-  const result = h("div", {});
-  function compute(idx) {
-    const base = parseInt(String(s.baseRent).replace(/\D/g, ""), 10);
-    if (!base || !s.startDate) {
-      result.replaceChildren();
+function calcEnhance() {
+  const form = document.getElementById("calc");
+  const out = document.getElementById("calc-out");
+  if (!form || form.tagName !== "FORM" || !out) return;
+  const el = form.elements;
+  if (!el.alquiler || !el.inicio || !el.indice || !el.cada || !el.meses || !el.pct) return;
+  const withExample = !!document.getElementById("ejemplo");
+  // Fields that do not apply to the chosen index are greyed out, never hidden, so the form keeps its height.
+  const conditional = () => {
+    el.meses.disabled = el.indice.value !== "IPC";
+    el.pct.disabled = el.indice.value !== "FIJO";
+  };
+  conditional();
+  let idx = null;
+  const idxP = indices().then((v) => (idx = v)).catch(() => null);
+  let shown = out.firstElementChild ? out.firstElementChild.id : "";
+  function compute() {
+    const base = parseInt(String(el.alquiler.value).slice(0, 20).replace(/\D/g, ""), 10);
+    const start = /^\d{4}-\d{2}-\d{2}$/.test(el.inicio.value) ? el.inicio.value : "";
+    if (!base || !start || !idx) {
+      if (shown !== "calc-empty") out.replaceChildren(calcEmpty(withExample));
+      shown = "calc-empty";
       return false;
     }
-    const lease = { ...s, baseRent: base, fixedPct: parseFloat(String(s.fixedPct).replace(",", ".")) || 0 };
-    const m = nowMonth();
-    const r = rentForMonth(lease, m, idx);
-    if (!r) {
-      result.replaceChildren(h("div", { class: "note" }, S("El contrato todavía no empezó.", "The lease has not started yet.")));
-      return false;
-    }
-    const next = addMonths(r.adjustmentMonth, lease.periodMonths);
-    result.replaceChildren(h("div", { class: "card", id: "calc-result" },
-      h("div", { class: "muted small" }, S(`Alquiler de ${monthName(m)}`, `Rent for ${monthName(m)}`)),
-      r.missing ? null : h("div", { class: "amount" }, ars(r.amount)),
-      explainRent(r),
-      h("p", { class: "muted small", style: "margin-top:12px" }, `${S("Próximo aumento", "Next increase")}: ${monthName(next)}.`),
-      h("a", { class: "btn block", href: U("/nuevo") }, S("Que se haga solo todos los meses", "Have it done for you every month"))));
-    return true;
-  }
-  const head = [h("h1", {}, S("Calculadora de aumento", "Rent increase calculator")), h("p", { class: "muted" }, S("Gratis y con datos oficiales. No hace falta registrarse.", "Free, official data, no sign-up."))];
-  loading(...head, h("div", { class: "card", id: "calc" }, h("p", { class: "muted" }, S("Cargando índices…", "Loading the indices…"))));
-  const pubP = api(`/api/lease/${SAMPLE_TENANT}`).catch(() => null);
-  let idx;
-  try {
-    idx = await indices();
-  } catch {
-    shell(...head, h("div", { class: "card", id: "calc" }, h("div", { class: "note err" }, S("No pudimos traer los índices. Probá en un rato.", "We could not load the indices. Please try again later."))));
-    return;
+    const index = ["IPC", "ICL", "FIJO"].includes(el.indice.value) ? el.indice.value : "IPC";
+    const lease = { baseRent: base, startDate: start, index, periodMonths: [1, 2, 3, 4, 6, 12].includes(+el.cada.value) ? +el.cada.value : 3,
+      lagMonths: [1, 2].includes(+el.meses.value) ? +el.meses.value : 2, fixedPct: parseFloat(String(el.pct.value).slice(0, 8).replace(",", ".")) || 0 };
+    const [node, ok] = calcResultCard(lease, idx);
+    out.replaceChildren(node);
+    shown = node.id || "note";
+    return ok;
   }
   // Every edit calls run(); only an edit that ends in a result is counted, and only once per index type.
-  const run = (byUser = true) => {
-    const ok = compute(idx);
-    if (!byUser) return;
-    if (ok) calcPing(s.index);
+  const run = async () => {
+    await idxP;
+    conditional();
+    const ok = compute();
+    if (ok) calcPing(el.indice.value);
     else clearTimeout(calcPingTimer);
   };
-  const fixedRow = h("div", { style: s.index === "FIJO" ? "" : "display:none" }, field(S("Porcentaje de cada aumento", "Percentage of each increase"), h("input", { inputmode: "decimal", placeholder: "10", value: s.fixedPct, oninput: (e) => { s.fixedPct = e.target.value; run(); } })));
-  const lagRow = h("div", { style: s.index === "IPC" ? "" : "display:none" }, field(S("Meses de IPC", "IPC months"), selectEl(s.lagMonths, LAGS, (v) => { s.lagMonths = +v; run(); })));
-  const example = h("div", {});
-  shell(...head,
-    h("div", { class: "card", id: "calc" },
-      field(S("Alquiler inicial del contrato", "Starting rent in the lease"), h("input", { inputmode: "numeric", placeholder: S("$ 500.000", "ARS 500,000"), autocomplete: "off", value: s.baseRent, oninput: (e) => { s.baseRent = e.target.value; run(); } })),
-      field(S("Fecha de inicio del contrato", "Lease start date"), h("input", { type: "date", value: s.startDate, oninput: (e) => { s.startDate = e.target.value; run(); } })),
-      field(S("¿Con qué índice aumenta?", "Which index raises it?"), selectEl(s.index, Object.entries(INDEX_NAMES), (v) => { s.index = v; fixedRow.style.display = v === "FIJO" ? "" : "none"; lagRow.style.display = v === "IPC" ? "" : "none"; run(); })),
-      field(S("¿Cada cuánto aumenta?", "How often does it go up?"), selectEl(s.periodMonths, PERIODS, (v) => { s.periodMonths = +v; run(); })),
-      lagRow, fixedRow,
-      h("p", { class: "tiny", style: "margin:12px 0 0" }, S(`IPC disponible hasta ${monthName(idx.ipcLast)}. Datos leídos de INDEC y BCRA el ${idx.retrievedAt.slice(0, 10)}.`, `IPC available up to ${monthName(idx.ipcLast)}. Data read from INDEC and BCRA on ${idx.retrievedAt.slice(0, 10)}.`))),
-    result, example);
-  run(false);
-  const card = exampleCard(workedExample(await pubP, idx));
-  if (card) example.replaceChildren(card);
+  form.addEventListener("input", run);
+  form.addEventListener("change", run);
+  // Calculate keeps working as a shareable link: the result is drawn here and the address bar gets the same query.
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    run();
+    const q = new URLSearchParams();
+    for (const [k, v] of new FormData(form)) if (String(v)) q.set(k, String(v).slice(0, 20));
+    try {
+      history.replaceState(null, "", "/calculadora" + (q.toString() ? "?" + q : ""));
+    } catch { /* not important */ }
+  });
+}
+
+/* ---------- Home: the tenant card replays its own calculation from the official monthly IPC ---------- */
+// Each frame is a true statement: starting rent × (IPC of month m ÷ IPC of the base month), month by month over the
+// published series, ending on the amount the agent charged. It runs only if that last frame equals the amount on the card.
+function enhanceHome() {
+  const demo = document.getElementById("demo");
+  if (!demo || !demo.dataset.levels) return;
+  const levels = demo.dataset.levels.split(",").map(Number);
+  const months = (demo.dataset.months || "").split(",");
+  const base = Number(demo.dataset.base);
+  const final = Number(demo.dataset.amount);
+  if (levels.length < 2 || levels.length > 40 || months.length !== levels.length || !levels.every((v) => Number.isFinite(v) && v > 0) ||
+    !months.every((m) => /^\d{4}-\d{2}$/.test(m)) || !Number.isInteger(base) || Math.floor(base * (levels.at(-1) / levels[0]) + 0.5) !== final) return;
+  const q = (sel) => demo.querySelector(sel);
+  const amt = q(".amount");
+  const fEl = q("[data-f]");
+  const aEl = q("[data-amt]");
+  const refEl = q("[data-ref]");
+  const pctEl = q("[data-pct]");
+  const label = q(".mlabel");
+  const svg = q(".spark");
+  const line = q(".spark .ln");
+  const dot = q(".spark .pt.end");
+  const btn = document.getElementById("replay");
+  if (!amt || !fEl || !aEl || !refEl || !label || !svg || !line || !dot || !btn) return;
+  if (window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const xy = (svg.dataset.xy || "").split(" ").map((p) => p.split(",").map(Number));
+  if (xy.length !== levels.length || !xy.every((p) => p.length === 2 && p.every(Number.isFinite))) return;
+  const cum = [0];
+  for (let i = 1; i < xy.length; i++) cum.push(cum[i - 1] + Math.hypot(xy[i][0] - xy[i - 1][0], xy[i][1] - xy[i - 1][1]));
+  const total = cum.at(-1);
+  const keep = { label: label.textContent, amt: amt.textContent, f: fEl.textContent, a: aEl.textContent, ref: refEl.textContent, pct: pctEl ? pctEl.textContent : "" };
+  const f6 = (n) => new Intl.NumberFormat(LOC, { minimumFractionDigits: 6, maximumFractionDigits: 6 }).format(n);
+  const step = 190;
+  let timers = [];
+  function frame(i) {
+    const f = levels[i] / levels[0];
+    const v = Math.floor(base * f + 0.5);
+    fEl.textContent = f6(f);
+    aEl.textContent = ars(v);
+    amt.textContent = ars(v);
+    refEl.textContent = monthShort(months[i]);
+    if (pctEl) pctEl.textContent = "+" + pctf((f - 1) * 100);
+    line.style.strokeDashoffset = String(total - cum[i]);
+    dot.style.transform = `translate(${xy[i][0] - xy.at(-1)[0]}px, ${xy[i][1] - xy.at(-1)[1]}px)`;
+  }
+  function play() {
+    timers.forEach(clearTimeout);
+    timers = [];
+    demo.classList.remove("landed");
+    line.style.transition = "none";
+    dot.style.transition = "none";
+    line.style.strokeDasharray = String(total);
+    label.textContent = S("Recalculando con el IPC del INDEC…", "Recalculating from INDEC's IPC…");
+    frame(0);
+    // Turn the transitions back on only after the reset has painted, without forcing a synchronous layout.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      line.style.transition = `stroke-dashoffset ${step}ms linear`;
+      dot.style.transition = `transform ${step}ms linear`;
+    }));
+    for (let i = 1; i < levels.length; i++) timers.push(setTimeout(() => frame(i), 300 + (i - 1) * step));
+    timers.push(setTimeout(() => {
+      label.textContent = keep.label;
+      amt.textContent = keep.amt;
+      fEl.textContent = keep.f;
+      aEl.textContent = keep.a;
+      refEl.textContent = keep.ref;
+      if (pctEl) pctEl.textContent = keep.pct;
+      demo.classList.add("landed");
+      timers.push(setTimeout(() => demo.classList.remove("landed"), 1400));
+    }, 300 + (levels.length - 1) * step + 60));
+  }
+  btn.hidden = false;
+  btn.addEventListener("click", play);
+  // Play once when the card is on screen.
+  if ("IntersectionObserver" in window) {
+    const io = new IntersectionObserver((es) => {
+      if (es.some((e) => e.isIntersecting)) {
+        io.disconnect();
+        setTimeout(play, 500);
+      }
+    }, { threshold: 0.6 });
+    io.observe(demo);
+  }
 }
 
 /* ---------- New lease ---------- */
@@ -794,7 +871,8 @@ function serverPage(enhance) {
 function route() {
   const p = location.pathname;
   let m;
-  if (p === "/calculadora") return viewCalc();
+  if (p === "/calculadora") return serverPage(calcEnhance);
+  if (p === "/") return serverPage(enhanceHome);
   if (p === "/nuevo") return viewNew();
   if ((m = p.match(/^\/panel\/([0-9a-f]{12})$/))) return viewPanel(m[1]);
   if (p === "/probar" || /^\/probar\/[0-9a-f]{12}$/.test(p)) return serverPage(() => probarEnhance((p.match(/^\/probar\/([0-9a-f]{12})$/) || [])[1] || null));

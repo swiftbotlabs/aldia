@@ -399,7 +399,22 @@ const pingCall = (app.match(/fetch\(`\/api\/calc-ping\?i=\$\{i\}`, (\{[^}]*\})\)
 assert.ok(pingCall, "app.js sends the ping");
 assert.ok(pingCall.includes('method: "POST"') && pingCall.includes("keepalive: true") && pingCall.includes('credentials: "omit"') && !/\bbody\b|headers/.test(pingCall), "no body, no headers, no cookies");
 assert.ok(/const CALC_TEST = new URLSearchParams\(location\.search\)\.get\("test"\) === "1";/.test(app) && /if \(CALC_TEST \|\| calcPinged\.has\(i\)/.test(app), "no ping on ?test=1, one per index per page load");
-assert.ok(/result, example\);\n {2}run\(false\);/.test(app), "the result a link's inputs bring on load is not pinged (the Worker counted that request)");
+// The live calculator enhances the Worker's form: it computes (and may ping) only on the visitor's own edits or submit,
+// never on load, so the result a link's inputs bring is not pinged (the Worker counted that request).
+const pingsOnlyOnEdits = (src) => {
+  const a = src.indexOf("function calcEnhance()");
+  const b = src.indexOf("/* ---------- Home", a);
+  if (a < 0 || b < 0) return false;
+  const body = src.slice(a, b).replace(/^\s*\/\/.*$/gm, "");
+  const listeners = body.includes('form.addEventListener("input", run);') && body.includes('form.addEventListener("change", run);');
+  const sub = body.indexOf('form.addEventListener("submit"');
+  const subEnd = sub < 0 ? -1 : body.indexOf("\n  });", sub);
+  const rest = sub < 0 || subEnd < 0 ? body : body.slice(0, sub) + body.slice(subEnd);
+  return listeners && !/\brun\(\s*\)/.test(rest) && !/\bcompute\(\s*\)/.test(rest.replace(/const ok = compute\(\);/, "").replace(/function compute\(\)/, ""));
+};
+assert.ok(pingsOnlyOnEdits(app), "the result a link's inputs bring on load is not pinged (the Worker counted that request)");
+// positive control: a load-time run() is caught
+assert.ok(!pingsOnlyOnEdits(app.replace("  conditional();\n  let idx = null;", "  conditional();\n  run();\n  let idx = null;")), "positive control: a run() on load fails the check");
 assert.strictEqual((app.match(/calc-ping/g) || []).length, 1, "one ping site");
 console.log("calc app ok");
 console.log("calc counter ok");

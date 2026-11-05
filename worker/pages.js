@@ -213,13 +213,17 @@ export function testLeaseLine(X, c, when) {
 const CHROME = {
   es: { html: "es-AR", og: "es_AR", calc: "Calculadora", probar: "Probar", other: "EN", otherName: "English", otherLang: "en",
     by: "Al Día es un producto de Swift Bot Labs. No somos una inmobiliaria ni un banco, y este sitio no reemplaza tu contrato ni un asesoramiento legal o impositivo.",
-    transp: "Transparencia", load: "Cargar contrato", tryIt: "Probalo con 1.000 wARS", code: "Código abierto", idx: "Índices", and: "y" },
+    transp: "Transparencia", load: "Cargar contrato", tryIt: "Probalo con 1.000 wARS", code: "Código abierto", idx: "Índices", and: "y",
+    product: "Producto", sources: "Fuentes y código", video: "Video (1:34)", base: `Swift Bot Labs · agente ERC-8004 n.º ${ONCHAIN.agentId} en Celo` },
   en: { html: "en", og: "en_US", calc: "Calculator", probar: "Try it", other: "ES", otherName: "Español", otherLang: "es",
     by: "Al Día is a Swift Bot Labs product. We are not an estate agent or a bank, and this site does not replace your contract or legal or tax advice.",
-    transp: "Transparency", load: "Load a lease", tryIt: "Try it with 1,000 wARS", code: "Open source", idx: "Indices", and: "and" },
+    transp: "Transparency", load: "Load a lease", tryIt: "Try it with 1,000 wARS", code: "Open source", idx: "Indices", and: "and",
+    product: "Product", sources: "Sources and code", video: "Video (1:34)", base: `Swift Bot Labs · ERC-8004 agent #${ONCHAIN.agentId} on Celo` },
 };
-// `refresh` reloads a page that is waiting on the agent, for readers without JavaScript.
-export function layout({ origin, path, search = "", title, description, ogTitle, body, noindex = false, ssr = true, lang = "es", refresh = 0 }) {
+export { CHROME };
+// `refresh` reloads a page that is waiting on the agent, for readers without JavaScript. `home` drops the page container:
+// the home page lays out its own full-width bands.
+export function layout({ origin, path, search = "", title, description, ogTitle, body, noindex = false, ssr = true, lang = "es", refresh = 0, home = false, narrow = false }) {
   const t = CHROME[lang] || CHROME.es;
   const X = fmt(lang);
   const canonical = origin + path + (lang === "en" ? "?lang=en" : "");
@@ -232,7 +236,7 @@ ${Number.isInteger(refresh) && refresh > 0 ? html`<meta http-equiv="refresh" con
 ` : ""}<title>${title}</title>
 <meta name="description" content="${description}">
 ${noindex ? html`<meta name="robots" content="noindex">
-` : ""}<meta name="theme-color" content="#0b6b4f">
+` : ""}<meta name="theme-color" content="#f7f6f2">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Al Día">
 <meta property="og:locale" content="${t.og}">
@@ -246,22 +250,63 @@ ${noindex ? html`<meta name="robots" content="noindex">
 <link rel="icon" href="/logo.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 <div id="app"${ssr ? html` data-ssr="${path}"` : ""}>
-<header class="top"><a class="brand" href="${X.u("/")}"><img src="/logo.svg" alt="">Al Día</a><nav><a href="${X.u("/probar")}">${t.probar}</a><a href="${X.u("/calculadora")}">${t.calc}</a><a class="lang" href="${toggleHref(path, search, lang)}" hreflang="${t.otherLang}" lang="${t.otherLang}" title="${t.otherName}">${t.other}</a></nav></header>
-<main class="wrap">
+<header class="top"><div class="wrap"><a class="brand" href="${X.u("/")}"><img src="/logo.svg" alt="" width="28" height="28">Al Día</a><nav><a class="nav-hide" href="${X.u("/transparencia")}">${t.transp}</a><a href="${X.u("/calculadora")}">${t.calc}</a><a class="lang" href="${toggleHref(path, search, lang)}" hreflang="${t.otherLang}" lang="${t.otherLang}" title="${t.otherName}">${t.other}</a><a class="nav-cta" href="${X.u("/probar")}">${t.probar}</a></nav></div></header>
+${home ? html`<main class="home">` : html`<main class="wrap${narrow ? " narrow" : ""}">`}
 ${body}
 </main>
-<footer><div class="wrap"><p>${t.by}</p><p><a href="${X.u("/transparencia")}">${t.transp}</a> · <a href="${X.u("/probar")}">${t.tryIt}</a> · <a href="${X.u("/nuevo")}">${t.load}</a> · <a href="${LINKS.repo}" rel="noopener">${t.code}</a> · ${t.idx}: <a href="${INDEC_PAGE}" rel="noopener">INDEC</a> ${t.and} <a href="${BCRA_PAGE}" rel="noopener">BCRA</a></p></div></footer>
+<footer><div class="wrap"><div class="foot"><div><a class="brand" href="${X.u("/")}"><img src="/logo.svg" alt="" width="28" height="28">Al Día</a><p>${t.by}</p></div><div><h4>${t.product}</h4><ul><li><a href="${X.u("/probar")}">${t.tryIt}</a></li><li><a href="${X.u("/calculadora")}">${t.calc}</a></li><li><a href="${X.u("/nuevo")}">${t.load}</a></li><li><a href="${X.u("/transparencia")}">${t.transp}</a></li></ul></div><div><h4>${t.sources}</h4><ul><li><a href="${LINKS.repo}" rel="noopener">${t.code}</a></li><li><a href="${LINKS.video}" rel="noopener">${t.video}</a></li><li>${t.idx}: <a href="${INDEC_PAGE}" rel="noopener">INDEC</a> ${t.and} <a href="${BCRA_PAGE}" rel="noopener">BCRA</a></li><li><a href="${LINKS.erc8004}" rel="noopener">ERC-8004</a></li></ul></div></div><p class="foot-base">${t.base}</p></div></footer>
 </div>
 <script src="/rent.js" defer></script>
 <script src="/app.js" defer></script>
 </body>
 </html>
 `.s;
+}
+
+/* ---------- small inline icons (one stroke width) ---------- */
+const ICONS = {
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  arrow: '<path d="M5 12h14"/><path d="m13 6 6 6-6 6"/>',
+  play: '<circle cx="12" cy="12" r="10"/><path d="m10 8 6 4-6 4z"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  replay: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
+  chart: '<path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 5-6"/>',
+  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+  bank: '<path d="M3 21h18"/><path d="M5 21V10M19 21V10M9 21V10M15 21V10"/><path d="m12 3 9 5H3z"/>',
+  calc: '<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8M8 11h2M14 11h2M8 15h2M14 15h2M8 19h2M14 19h2"/>',
+};
+export const icon = (name) => new Raw(`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ""}</svg>`);
+
+// A small line chart of official index levels (real data only), with the coordinates the hero animation reuses.
+const SW = 300;
+const SH = 64;
+export function sparkPoints(levels) {
+  if (!Array.isArray(levels) || levels.length < 2 || !levels.every(fin)) return null;
+  const lo = Math.min(...levels);
+  const hi = Math.max(...levels);
+  const span = hi - lo || 1;
+  return levels.map((v, i) => [Math.round((4 + (i * (SW - 8)) / (levels.length - 1)) * 10) / 10, Math.round((SH - 6 - ((v - lo) / span) * (SH - 14)) * 10) / 10]);
+}
+export function sparkSvg(levels) {
+  const pts = sparkPoints(levels);
+  if (!pts) return "";
+  const d = "M" + pts.map(([x, y]) => `${x} ${y}`).join(" L");
+  const [fx, fy] = pts[0];
+  const [lx, ly] = pts.at(-1);
+  return new Raw(`<svg class="spark" viewBox="0 0 ${SW} ${SH}" aria-hidden="true" data-xy="${pts.map((p) => p.join(",")).join(" ")}"><line class="gd" x1="0" y1="${fy}" x2="${SW}" y2="${fy}"/><path class="ar" d="${d} L${lx} ${SH} L${fx} ${SH} Z"/><path class="ln" d="${d}"/><circle class="pt" cx="${fx}" cy="${fy}" r="3.5"/><circle class="pt end" cx="${lx}" cy="${ly}" r="4"/></svg>`);
+}
+// The monthly series between two months of an index, or null when a month is missing.
+export function seriesBetween(series, from, to) {
+  if (!series || !isMonth(from) || !isMonth(to) || from > to) return null;
+  const months = [];
+  for (let m = from; m <= to && months.length < 40; m = addMonths(m, 1)) months.push(m);
+  const levels = months.map((m) => series[m]);
+  return levels.every(fin) ? { months, levels } : null;
 }
 
 /* ---------- shared parts ---------- */
@@ -348,58 +393,80 @@ function outsideCard(X, o) {
     `Un alquiler ya liquidado cuenta como pago externo de dos maneras, y este sitio lo revisa solo en el explorador público de Celo (Blockscout) antes de sumar a nadie. Desde una billetera: los wARS salieron directo de una billetera que no es nuestra, cuyos primeros fondos no vinieron de una billetera nuestra y que tiene actividad en Celo desde antes del 6 de octubre de 2026. Por transferencia bancaria vía Ripio: los wARS los mandó la billetera de Ripio y la firmó ella misma, lo que llegó coincide con el alquiler del mes (margen de ${RAMP_TOLERANCE_PCT} %) y el propietario no es una billetera nuestra ni recibió nunca nada de una billetera nuestra. Nosotros no tenemos cuenta en Ripio. Si algo no se puede comprobar, no cuenta.`,
     `A settled rent counts as an outside payment in one of two ways, and this site checks it by itself on Celo's public explorer (Blockscout) before counting anyone. From a wallet: the wARS came straight from a wallet that is not ours, whose first funds did not come from one of our wallets, and whose first Celo activity is before 6 October 2026. By bank transfer through Ripio: Ripio's wallet sent and signed the wARS transfer, the amount matches the month's rent (within ${RAMP_TOLERANCE_PCT}%), and the landlord is not one of our wallets and never received anything from one. We have no Ripio account. If something cannot be proven, it does not count.`);
   const label = X.en ? PAYER_LABEL.en : PAYER_LABEL.es;
-  return html`<section class="card" id="externos"><h3>${s("Pagadores externos", "Outside payers")}</h3><p class="small">${rule}</p>${
+  return html`<section class="card wide" id="externos"><div class="xgrid"><div><h3>${s("Pagadores externos", "Outside payers")}</h3><p class="small">${rule}</p></div><div>${
     o.payers.length ? html`<h3 style="margin-top:14px">${s("Desde una billetera", "From a wallet")}</h3><table><tr><th>${s("Billetera", "Wallet")}</th><th>${s("Pagó el", "Paid on")}</th><th class="r">${s("En Celo", "On Celo")}</th></tr>${o.payers.map((p) => html`<tr><td><a href="${addrUrl(p.address)}" rel="noopener" class="mono">${short(p.address)}</a><br><span class="tiny">${label}${p.firstSeen ? s(` · en Celo desde ${X.month(p.firstSeen.slice(0, 7))}`, ` · on Celo since ${X.month(p.firstSeen.slice(0, 7))}`) : ""}</span></td><td>${X.dayFull(p.date)}</td><td class="r"><a href="${txUrl(p.tx)}" rel="noopener">${s("pago", "payment")}</a>${p.receipt ? html`<br><a href="${u(p.receipt)}">${s("recibo", "receipt")}</a>` : ""}</td></tr>`)}</table>` : ""}${
     o.ramp.length ? html`<h3 style="margin-top:14px">${s("Por transferencia vía Ripio", "By bank transfer through Ripio")}</h3><table><tr><th>${s("Pago", "Payment")}</th><th>${s("Fecha", "Date")}</th><th class="r">${s("En Celo", "On Celo")}</th></tr>${o.ramp.map((r) => html`<tr><td>${r.wars === null ? "—" : `${X.num(r.wars)} wARS`}<br><span class="tiny">${X.en ? RAMP_LABEL.en : RAMP_LABEL.es}</span></td><td>${X.dayFull(r.date)}</td><td class="r"><a href="${txUrl(r.tx)}" rel="noopener">${s("pago", "payment")}</a>${r.receipt ? html`<br><a href="${u(r.receipt)}">${s("recibo", "receipt")}</a>` : ""}</td></tr>`)}</table>` : ""}${
-    !o.payers.length && !o.ramp.length ? html`<p class="small muted" style="margin:0">${s("Todavía ninguno.", "None yet.")} <a href="${u("/probar")}">${s("Probalo con un alquiler real de 1.000 wARS", "Try it with a real 1,000 wARS rent")}</a>${s(": vos sos el propietario, así que la plata te vuelve, menos el 0,3 %.", ": you are the landlord, so the money comes back to you, less 0.3%.")}</p>` : ""}${
+    !o.payers.length && !o.ramp.length ? html`<div class="countbox" style="margin:0 0 12px"><b>0</b><span class="muted">${s("pagadores externos verificados", "verified outside payers")}</span></div><p class="small muted" style="margin:0">${s("Todavía ninguno.", "None yet.")} <a href="${u("/probar")}">${s("Probalo con un alquiler real de 1.000 wARS", "Try it with a real 1,000 wARS rent")}</a>${s(": vos sos el propietario, así que la plata te vuelve, menos el 0,3 %.", ": you are the landlord, so the money comes back to you, less 0.3%.")}</p>` : ""}${
     o.notCounted.length ? html`<h3 style="margin-top:16px">${s("Pagos que no contamos", "Payments we did not count")}</h3><table>${o.notCounted.map((r) => html`<tr><td>${r.address ? html`<span class="mono">${short(r.address)}</span>` : r.ramp ? s("Transferencia vía Ripio", "Bank transfer through Ripio") : s("Billetera nuestra", "One of our wallets")}<br><span class="tiny">${(X.en ? REASONS.en : REASONS.es)[r.reason]}</span></td><td class="r">${r.tx ? html`<a href="${txUrl(r.tx)}" rel="noopener">${s("pago", "payment")}</a>` : "—"}</td></tr>`)}</table>` : ""}${
-    o.checkedAt ? html`<p class="tiny" style="margin:10px 0 0">${s("Revisado", "Checked")}: ${o.checkedAt.slice(0, 16).replace("T", " ")} UTC${o.complete ? "" : s(", la revisión sigue en curso", ", the check is still running")}.</p>` : html`<p class="tiny" style="margin:10px 0 0">${s("La revisión todavía no corrió: hasta entonces no contamos a nadie.", "The check has not run yet: until it does, nobody is counted.")}</p>`}</section>`;
+    o.checkedAt ? html`<p class="tiny" style="margin:10px 0 0">${s("Revisado", "Checked")}: ${o.checkedAt.slice(0, 16).replace("T", " ")} UTC${o.complete ? "" : s(", la revisión sigue en curso", ", the check is still running")}.</p>` : html`<p class="tiny" style="margin:10px 0 0">${s("La revisión todavía no corrió: hasta entonces no contamos a nadie.", "The check has not run yet: until it does, nobody is counted.")}</p>`}</div></div></section>`;
 }
 
 /* ---------- pages ---------- */
 // The home page leads with the product: what a tenant sees this month, a settled receipt, the 2-minute test and the video.
-// What is and is not real yet follows right after, in its own panel.
-async function pageHome(env, X, waitUntil) {
+// What is and is not real yet follows, in its own panel.
+async function pageHome(env, X, waitUntil, origin) {
   const { s, u } = X;
-  const [pub, rec, st0, o0, rents] = await Promise.all([kv(env, `pub:${SAMPLE_TENANT}`), kv(env, `receipt:${SAMPLE_RECEIPT.id}:${SAMPLE_RECEIPT.month}`), kv(env, "stats"), outsideSummary(env, waitUntil), testRents(env)]);
+  const [pub, rec, st0, o0, rents, idx] = await Promise.all([kv(env, `pub:${SAMPLE_TENANT}`), kv(env, `receipt:${SAMPLE_RECEIPT.id}:${SAMPLE_RECEIPT.month}`), kv(env, "stats"), outsideSummary(env, waitUntil), testRents(env), kv(env, "indices")]);
   const o = cleanOutside(o0);
   const st = st0 || {};
   const counts = testLeaseCounts(st, rents);
   const c = pub && pub.current && typeof pub.current === "object" && fin(pub.current.amount) && isMonth(pub.current.month) ? pub.current : null;
   const d = c && c.detail && typeof c.detail === "object" ? c.detail : null;
-  // The one-line proof of the amount, shown only when the published levels give exactly the amount charged.
-  let calcLine = "";
+  // The one-line proof of the amount, shown only when the published levels give exactly the amount charged. When the
+  // official monthly series between the two months is on hand and ends on those same levels, it is drawn as a chart and
+  // handed to the browser, which replays the calculation month by month (web/app.js enhanceHome).
+  let calcBox = "";
+  let anim = null;
   if (d && d.index === "IPC" && d.adjustments > 0 && fin(d.levelFrom) && fin(d.levelTo) && d.levelFrom > 0 && Number.isInteger(d.baseRent) && isMonth(d.refFrom) && isMonth(d.refTo)) {
     const f = d.levelTo / d.levelFrom;
     if (Math.floor(d.baseRent * f + 0.5) === c.amount) {
-      calcLine = html`<p class="calcline"><span class="nw">${X.ars(d.baseRent)} × ${X.factor6(f)}</span> <span class="nw">= <b>${X.ars(c.amount)}</b></span></p><p class="tiny" style="margin:0 0 6px">${s(`IPC ${X.monthShort(d.refTo)} ÷ IPC ${X.monthShort(d.refFrom)}, del INDEC`, `IPC ${X.monthShort(d.refTo)} ÷ IPC ${X.monthShort(d.refFrom)}, from INDEC`)}</p>`;
+      const ser = seriesBetween(idx && idx.ipc, d.refFrom, d.refTo);
+      const okSer = ser && ser.levels[0] === d.levelFrom && ser.levels.at(-1) === d.levelTo ? ser : null;
+      if (okSer) anim = { base: d.baseRent, amount: c.amount, levels: okSer.levels.join(","), months: okSer.months.join(",") };
+      calcBox = html`<div class="calc"><div class="calc-head"><span>${s("IPC nivel general, INDEC", "IPC, national, INDEC")}</span>${fin(d.pct) ? html`<b data-pct>+${X.pctf(d.pct)}</b>` : ""}</div>${
+        okSer ? html`${sparkSvg(okSer.levels)}<div class="spark-x"><span>${X.monthShort(okSer.months[0])}</span><span>${X.monthShort(okSer.months.at(-1))}</span></div>` : ""}<p class="calcline"><span class="nw">${X.ars(d.baseRent)} × <span data-f>${X.factor6(f)}</span></span> <span class="nw">= <b data-amt>${X.ars(c.amount)}</b></span></p><p class="tiny">${s("IPC ", "IPC ")}<span data-ref>${X.monthShort(d.refTo)}</span>${s(` ÷ IPC ${X.monthShort(d.refFrom)}, del INDEC`, ` ÷ IPC ${X.monthShort(d.refFrom)}, from INDEC`)}</p></div>`;
     }
   }
-  const demo = c ? html`<div class="demo" id="demo"><div class="demo-top"><span class="tiny">${s("Lo que ve el inquilino", "What the tenant sees")}</span>${statusChip(X, c.status)}</div><div class="small muted" style="margin-top:6px">${s(`Alquiler de ${X.month(c.month, false)}`, `${X.month(c.month, false)} rent`)}</div><div class="amount">${X.ars(c.amount)}</div>${
-    isDay(c.dueDate) ? html`<p class="small" style="margin:0 0 4px">${s(`Vence el ${X.dayMonth(c.dueDate)}`, `Due ${X.dayMonth(c.dueDate)}`)}${fin(d && d.pct) ? s(` · +${X.pctf(d.pct)} por IPC`, ` · +${X.pctf(d.pct)} by IPC`) : ""}</p>` : ""}${calcLine}${
-    c.clauseCheck && c.clauseCheck.ok === true ? html`<p class="small" style="margin:0 0 6px">✓ ${s("Coincide con la cláusula (revisión paga en Celo)", "Matches the lease clause (paid check on Celo)")}</p>` : ""}<a class="small" href="${u(`/pagar/${SAMPLE_TENANT}`)}">${s("¿Por qué este monto?", "Why this amount?")} →</a></div>` : "";
+  const demo = c ? html`<div class="demo" id="demo"${anim ? html` data-base="${anim.base}" data-amount="${anim.amount}" data-levels="${anim.levels}" data-months="${anim.months}"` : ""}><div class="demo-top"><span class="who"><img src="/logo.svg" alt="" width="20" height="20">${s("Lo que ve el inquilino", "What the tenant sees")}</span>${statusChip(X, c.status)}</div><div class="mlabel">${s(`Alquiler de ${X.month(c.month, false)}`, `${X.month(c.month, false)} rent`)}</div><div class="amount">${X.ars(c.amount)}</div>${
+    isDay(c.dueDate) ? html`<p class="due">${s(`Vence el ${X.dayMonth(c.dueDate)}`, `Due ${X.dayMonth(c.dueDate)}`)}${fin(d && d.pct) ? s(` · +${X.pctf(d.pct)} por IPC`, ` · +${X.pctf(d.pct)} by IPC`) : ""}</p>` : ""}${calcBox}${
+    c.clauseCheck && c.clauseCheck.ok === true ? html`<p class="check">${icon("check")}<span>${s("Coincide con la cláusula (revisión paga en Celo)", "Matches the lease clause (paid check on Celo)")}</span></p>` : ""}<div class="demo-foot"><a href="${u(`/pagar/${SAMPLE_TENANT}`)}">${s("¿Por qué este monto?", "Why this amount?")} →</a>${
+    anim ? html`<button class="linkbtn" type="button" id="replay" hidden>${icon("replay")}${s("Recalcular", "Recalculate")}</button>` : ""}</div></div>` : "";
   const r = rec && fin(rec.received) && isDay(rec.paidAt) ? rec : null;
-  const receipt = r ? html`<a class="rcpt" href="${u(`/recibo/${SAMPLE_RECEIPT.id}/${SAMPLE_RECEIPT.month}`)}"><span class="chip ok">✓ ${s("Liquidado en Celo", "Settled on Celo")}</span> <span class="small">${s(
+  const receipt = r ? html`<div class="rcpt"><div class="rcpt-top"><span class="chip ok">${icon("check")}${s("Liquidado en Celo", "Settled on Celo")}</span><a href="${u(`/recibo/${SAMPLE_RECEIPT.id}/${SAMPLE_RECEIPT.month}`)}">${s("Ver recibo", "View receipt")} →</a></div><p>${s(
     `Recibo: ${X.ars(r.received)} cobrados el ${X.dayMonth(r.paidAt)}${r.index === "ICL" || r.index === "IPC" ? ` (${r.index})` : ""}; el propietario recibió ${payoutPhrase(X, r)}.`,
-    `Receipt: ${X.ars(r.received)} collected on ${X.dayMonth(r.paidAt)}${r.index === "ICL" || r.index === "IPC" ? ` (${r.index})` : ""}; the landlord got ${payoutPhrase(X, r)}.`)}</span></a>` : "";
-  const sample = c || r ? html`<p class="tiny" style="margin:8px 0 0">${s("Contrato y recibo de prueba nuestros, con índices oficiales reales.", "Our own test lease and receipt, with the real official indices.")} <a href="#real">${s("Qué es real hoy", "What is real today")}</a></p>` : "";
-  const hero = html`<section class="hero home"><h1>${s("El alquiler que se actualiza y se cobra solo.", "Rent that updates and collects itself.")}</h1><p class="lead">${s(
+    `Receipt: ${X.ars(r.received)} collected on ${X.dayMonth(r.paidAt)}${r.index === "ICL" || r.index === "IPC" ? ` (${r.index})` : ""}; the landlord got ${payoutPhrase(X, r)}.`)}</p>${
+    isTx(r.settleTx) ? html`<p class="hash">${s("Liquidación", "Settlement")} <a href="${txUrl(r.settleTx)}" rel="noopener" title="${r.settleTx}">${r.settleTx.slice(0, 10)}…${r.settleTx.slice(-6)}</a></p>` : ""}</div>` : "";
+  const sample = c || r ? html`<p class="stage-cap">${s("Contrato y recibo de prueba nuestros, con índices oficiales reales.", "Our own test lease and receipt, with the real official indices.")} <a href="#real">${s("Qué es real hoy", "What is real today")}</a></p>` : "";
+  const hero = html`<section class="wrap"><div class="hero"><div class="h-copy"><p class="eyebrow">${s("Alquileres con IPC o ICL, cobrados en pesos", "Rents on IPC or ICL, collected in pesos")}</p><h1>${s("El alquiler que se actualiza y se cobra solo.", "Rent that updates and collects itself.")}</h1><p class="lead">${s(
     "Para propietarios en Argentina: el agente calcula cada aumento con el índice oficial, cobra en pesos y te pasa a dólares la parte que elijas. Tu inquilino ve cuánto paga y por qué, y paga por transferencia, como siempre.",
-    "For landlords in Argentina: the agent works out each increase from the official index, collects the rent in pesos and turns the share you choose into dollars. Your tenant sees what is due and why, and pays by bank transfer.")}</p>${demo}${receipt}${sample}
-<a class="btn block cta" href="${u("/probar")}">${s("Probalo en 2 minutos", "Try it in 2 minutes")} →</a>
-<p class="small muted" style="margin:8px 0 0">${s("Pagás 1.000 wARS (unos US$ 0,60) a un contrato real en Celo y te vuelven 997 con su recibo.", "Pay 1,000 wARS (about US$0.60) into a real lease on Celo and get 997 back, with a receipt.")}</p>
-<p class="small proof"><a href="${LINKS.video}" rel="noopener">▶ ${s("Ver el video (1:34)", "Watch the video (1:34)")}</a> · ${s("Agente en Celo", "Agent on Celo")} <a href="${LINKS.erc8004}" rel="noopener">ERC-8004 ${s(`n.º ${ONCHAIN.agentId}`, `#${ONCHAIN.agentId}`)}</a> · ${s("cada pago con comprobante en la red", "every payment with an onchain receipt")}</p></section>`;
-  const steps = html`<section class="steps" aria-label="${s("Cómo funciona", "How it works")}"><div class="card"><span class="num">1</span><h3>${s("Cargás el contrato", "You load the lease")}</h3><p class="muted small">${s("Monto, fecha de inicio, índice (IPC, ICL o un porcentaje fijo) y cada cuánto aumenta. Si lo tenés en PDF, lo leemos por vos.", "Amount, start date, index (IPC, ICL or a fixed percentage) and how often it goes up. If it is a PDF, we read it for you.")}</p></div><div class="card"><span class="num">2</span><h3>${s("Mandás un solo link", "You send one link")}</h3><p class="muted small">${s("Tu inquilino ve cuánto paga este mes, por qué y de dónde sale el número. Paga por transferencia desde su banco, como siempre.", "Your tenant sees what this month's rent is, why, and where the number comes from, and pays by bank transfer as usual.")}</p></div><div class="card"><span class="num">3</span><h3>${s("Cobrás como quieras", "You get paid your way")}</h3><p class="muted small">${s("Apenas entra el pago, el agente lo concilia, te manda la parte en pesos, pasa a dólares lo que elegiste y deja el recibo listo.", "As soon as the money arrives, the agent reconciles it, sends you the peso share, converts the share you chose to dollars and issues the receipt.")}</p></div></section>`;
+    "For landlords in Argentina: the agent works out each increase from the official index, collects the rent in pesos and turns the share you choose into dollars. Your tenant sees what is due and why, and pays by bank transfer.")}</p></div>
+<div class="h-vis"><div class="stage">${demo}${receipt}</div>${sample}</div>
+<div class="h-act"><div class="ctas"><a class="btn cta" href="${u("/probar")}">${s("Probalo en 2 minutos", "Try it in 2 minutes")} <span class="arr">→</span></a><a class="btn ghost" href="${u("/calculadora")}">${s("Calcular un aumento", "Work out an increase")}</a></div>
+<p class="fine">${s("Pagás 1.000 wARS (unos US$ 0,60) a un contrato real en Celo y te vuelven 997 con su recibo.", "Pay 1,000 wARS (about US$0.60) into a real lease on Celo and get 997 back, with a receipt.")}</p>
+<p class="proof"><a class="play" href="${LINKS.video}" rel="noopener">${icon("play")}${s("Ver el video (1:34)", "Watch the video (1:34)")}</a> · ${s("Agente en Celo", "Agent on Celo")} <a href="${LINKS.erc8004}" rel="noopener">ERC-8004 ${s(`n.º ${ONCHAIN.agentId}`, `#${ONCHAIN.agentId}`)}</a> · ${s("cada pago con comprobante en la red", "every payment with an onchain receipt")}</p></div></div>
+<div class="metrics"><div class="metric"><b>${s("2 min", "2 min")}</b><span>${s("para probarlo con un alquiler real de 1.000 wARS en Celo", "to try it with a real 1,000 wARS rent on Celo")}</span></div><div class="metric"><b>${s("0,3 %", "0.3%")}</b><span>${s("de cada alquiler cobrado; la calculadora es gratis", "of each rent collected; the calculator is free")}</span></div><div class="metric"><b>IPC · ICL</b><span>${s("índices oficiales del INDEC y el BCRA", "official indices from INDEC and the BCRA")}</span></div><div class="metric"><b>${s(`n.º ${ONCHAIN.agentId}`, `#${ONCHAIN.agentId}`)}</b><span>${s("agente ERC-8004 en la red principal de Celo", "ERC-8004 agent on Celo mainnet")}</span></div></div></section>`;
+
+  // How it works, each step with a small picture built from the same sample lease and receipt.
+  const terms = d ? termsFromDetail(d, pub.periodMonths) : null;
+  const v1 = terms ? html`<div class="step-vis" aria-hidden="true"><div class="fr"><span>${s("Alquiler inicial", "Starting rent")}</span><b>${X.ars(terms.baseRent)}</b></div><div class="fr"><span>${s("Índice", "Index")}</span><b>${indexNames(X)[terms.index] || terms.index}</b></div><div class="fr"><span>${s("Aumenta", "Goes up")}</span><b>${((periods(X).find(([n]) => n === terms.periodMonths) || [0, ""])[1]).toLowerCase()}</b></div></div>` : "";
+  const host = (() => { try { return new URL(origin).host; } catch { return "aldia.swiftbotlab.workers.dev"; } })();
+  const v2 = c ? html`<div class="step-vis" aria-hidden="true"><div class="url">${icon("link")}<span>${host}/pagar/${SAMPLE_TENANT}</span></div><div class="fr"><span>${s(`Alquiler de ${X.month(c.month, false)}`, `${X.month(c.month, false)} rent`)}</span><b>${X.ars(c.amount)}</b></div>${fin(d && d.pct) ? html`<div class="fr"><span>${s("Por qué", "Why")}</span><b>IPC +${X.pctf(d.pct)}</b></div>` : ""}</div>` : "";
+  const v3 = r ? html`<div class="step-vis" aria-hidden="true"><div class="fr"><span>${s("Cobrado", "Collected")}</span><b>${X.ars(r.received)}</b></div><div class="fr"><span>${s("Comisión Al Día", "Al Día fee")}</span><b>${X.ars(r.fee)}</b></div><div class="fr ok"><span>${s("Al propietario", "To the landlord")}</span><b>${payoutPhrase(X, r)}</b></div></div>` : "";
+  const steps = html`<section class="band alt"><div class="wrap"><div class="sec-head"><p class="kicker">${s("Cómo funciona", "How it works")}</p><h2>${s("Un contrato, un link y el recibo de cada mes", "One lease, one link, a receipt every month")}</h2><p>${s("El propietario carga el contrato una vez. Después el agente hace la cuenta, cobra y deja el comprobante.", "The landlord loads the lease once. From then on the agent does the maths, collects and leaves the proof.")}</p></div><div class="steps" aria-label="${s("Cómo funciona", "How it works")}"><div class="card">${v1}<span class="num">1</span><h3>${s("Cargás el contrato", "You load the lease")}</h3><p class="muted small">${s("Monto, fecha de inicio, índice (IPC, ICL o un porcentaje fijo) y cada cuánto aumenta. Si lo tenés en PDF, lo leemos por vos.", "Amount, start date, index (IPC, ICL or a fixed percentage) and how often it goes up. If it is a PDF, we read it for you.")}</p></div><div class="card">${v2}<span class="num">2</span><h3>${s("Mandás un solo link", "You send one link")}</h3><p class="muted small">${s("Tu inquilino ve cuánto paga este mes, por qué y de dónde sale el número. Paga por transferencia desde su banco, como siempre.", "Your tenant sees what this month's rent is, why, and where the number comes from, and pays by bank transfer as usual.")}</p></div><div class="card">${v3}<span class="num">3</span><h3>${s("Cobrás como quieras", "You get paid your way")}</h3><p class="muted small">${s("Apenas entra el pago, el agente lo concilia, te manda la parte en pesos, pasa a dólares lo que elegiste y deja el recibo listo.", "As soon as the money arrives, the agent reconciles it, sends you the peso share, converts the share you chose to dollars and issues the receipt.")}</p></div></div></div></section>`;
+
   const n = (v) => (Number.isInteger(v) ? v : "—");
   const rampDone = o.rampPayments > 0;
-  const real = html`<section class="card real" id="real"><h2>${s("Qué es real hoy", "What is real today")}</h2><ul>
-<li><b>${s("En la red principal de Celo, con wARS reales:", "On Celo mainnet, with real wARS:")}</b> ${s(`el agente (ERC-8004 n.º ${ONCHAIN.agentId}), sus contratos verificados y ${n(st.paymentsTest)} alquileres cobrados y liquidados, cada uno con su recibo y sus operaciones.`, `the agent (ERC-8004 #${ONCHAIN.agentId}), its verified contracts and ${n(st.paymentsTest)} rents collected and settled, each with its receipt and transactions.`)}</li>
-<li><b>${s("Esos alquileres son pruebas nuestras.", "Those rents are our own tests.")}</b> ${counts ? testLeaseLine(X, counts, null) : s(`Los pagamos nosotros para probar el ciclo completo (${n(st.leasesTest)} contratos de prueba).`, `We paid them ourselves to run the full cycle (${n(st.leasesTest)} test leases).`)} ${s("Todavía no hay un propietario ni un inquilino reales.", "There is no real landlord or tenant yet.")}</li>
-<li><b>${s(`Pagadores externos verificados: ${o.count}.`, `Verified outside payers: ${o.count}.`)}</b> ${s("Se cuentan solo después de un control automático en el explorador público de Celo.", "They are counted only after an automatic check on Celo's public explorer.")} <a href="${u("/transparencia#externos")}">${s("Ver la regla y la lista", "See the rule and the list")}</a>.</li>
-<li><b>${s("Pago por transferencia vía Ripio:", "Bank transfer through Ripio:")}</b> ${rampDone ? s(`${o.rampPayments} pago(s) verificados por este camino.`, `${o.rampPayments} verified payment(s) this way.`) : s("armado y conectado, pero ningún inquilino real lo completó todavía de punta a punta.", "built and wired in, but no real tenant has completed it end to end yet.")}</li>
-<li><b>MiniPay</b> ${s("probado con un simulador de billetera, todavía no dentro de MiniPay. El gas en dólares digitales está hecho y probado una vez, apagado en uso normal.", "tested with a wallet stub, not yet inside MiniPay. Gas paid in digital dollars is built and was tested once; it is off in normal running.")}</li>
-</ul><p class="small" style="margin:0"><a href="${u("/transparencia")}">${s("Todo, con su fuente, en Transparencia", "Everything, with its source, on the Transparency page")}</a></p></section>`;
-  const problem = html`<section class="card"><h2>${s("Lo que deja de ser tu problema", "What stops being your problem")}</h2><p>${s("Buscar el IPC del trimestre, hacer la cuenta, mandar el mensaje, mirar el banco para ver si pagó, armar el recibo y correr a comprar dólares antes de que se devalúe. Todo eso lo hace el agente, todos los meses, y lo deja a la vista de las dos partes.", "Looking up the quarter's IPC, doing the maths, sending the message, checking the bank to see whether the tenant paid, writing the receipt and rushing to buy dollars before the peso slides. The agent does all of that every month, in plain view of both sides.")}</p><p class="muted small">${s("El cálculo usa solo fuentes oficiales: INDEC para el IPC y el BCRA para el ICL. El IPC del INDEC se compara con otras dos series oficiales (Ministerio de Economía y BCRA); si no coinciden, el agente no emite ningún cobro nuevo hasta que coincidan.", "Only official sources are used: INDEC for IPC and the central bank (BCRA) for ICL. INDEC's IPC is checked against two other official series (Ministry of Economy and BCRA); if they disagree, the agent issues no new charge until they match.")}</p><div class="row"><a class="btn ghost" href="${u("/nuevo")}">${s("Cargar mi contrato", "Load my lease")}</a><a class="btn ghost" href="${u("/calculadora")}">${s("Calcular un aumento", "Work out an increase")}</a></div></section>`;
+  const problem = html`<section class="band" style="padding-bottom:0"><div class="wrap two"><div><p class="kicker">${s("Para el propietario", "For the landlord")}</p><h2>${s("Lo que deja de ser tu problema", "What stops being your problem")}</h2><p class="big">${s("Buscar el IPC del trimestre, hacer la cuenta, mandar el mensaje, mirar el banco para ver si pagó, armar el recibo y correr a comprar dólares antes de que se devalúe. Todo eso lo hace el agente, todos los meses, y lo deja a la vista de las dos partes.", "Looking up the quarter's IPC, doing the maths, sending the message, checking the bank to see whether the tenant paid, writing the receipt and rushing to buy dollars before the peso slides. The agent does all of that every month, in plain view of both sides.")}</p><div class="row"><a class="btn ghost" href="${u("/nuevo")}">${s("Cargar mi contrato", "Load my lease")}</a><a class="btn ghost" href="${u("/calculadora")}">${s("Calcular un aumento", "Work out an increase")}</a></div></div>
+<div class="card"><h3>${s("Solo fuentes oficiales", "Official sources only")}</h3><ul class="srcs"><li><span class="ic">${icon("chart")}</span><b>INDEC</b><span>${s("IPC nivel general nacional", "IPC, national general CPI")}</span></li><li><span class="ic">${icon("shield")}</span><b>${s("Ministerio de Economía y BCRA", "Ministry of Economy and BCRA")}</b><span>${s("Dos series oficiales más para controlar el IPC", "Two more official series to check the IPC")}</span></li><li><span class="ic">${icon("bank")}</span><b>BCRA</b><span>${s("ICL, Índice para Contratos de Locación", "ICL, the rental contracts index")}</span></li></ul><p class="muted small" style="margin:16px 0 0">${s("El cálculo usa solo fuentes oficiales: INDEC para el IPC y el BCRA para el ICL. El IPC del INDEC se compara con otras dos series oficiales (Ministerio de Economía y BCRA); si no coinciden, el agente no emite ningún cobro nuevo hasta que coincidan.", "Only official sources are used: INDEC for IPC and the central bank (BCRA) for ICL. INDEC's IPC is checked against two other official series (Ministry of Economy and BCRA); if they disagree, the agent issues no new charge until they match.")}</p></div></div></section>`;
+
+  const row = (chip, body) => html`<li>${chip}<div>${body}</div></li>`;
+  const real = html`<section class="band" id="real"><div class="wrap"><div class="card real"><div class="real-head"><p class="kicker">${s("Sin letra chica", "No small print")}</p><h2>${s("Qué es real hoy", "What is real today")}</h2></div><ul>
+${row(html`<span class="chip ok">${s("Red principal", "Mainnet")}</span>`, html`<b>${s("En la red principal de Celo, con wARS reales:", "On Celo mainnet, with real wARS:")}</b> ${s(`el agente (ERC-8004 n.º ${ONCHAIN.agentId}), sus contratos verificados y ${n(st.paymentsTest)} alquileres cobrados y liquidados, cada uno con su recibo y sus operaciones.`, `the agent (ERC-8004 #${ONCHAIN.agentId}), its verified contracts and ${n(st.paymentsTest)} rents collected and settled, each with its receipt and transactions.`)}`)}
+${row(html`<span class="chip mute">${s("Pruebas nuestras", "Our tests")}</span>`, html`<b>${s("Esos alquileres son pruebas nuestras.", "Those rents are our own tests.")}</b> ${counts ? testLeaseLine(X, counts, null) : s(`Los pagamos nosotros para probar el ciclo completo (${n(st.leasesTest)} contratos de prueba).`, `We paid them ourselves to run the full cycle (${n(st.leasesTest)} test leases).`)} ${s("Todavía no hay un propietario ni un inquilino reales.", "There is no real landlord or tenant yet.")}`)}
+${row(html`<span class="chip info">${s(`Externos: ${o.count}`, `Outside: ${o.count}`)}</span>`, html`<b>${s(`Pagadores externos verificados: ${o.count}.`, `Verified outside payers: ${o.count}.`)}</b> ${s("Se cuentan solo después de un control automático en el explorador público de Celo.", "They are counted only after an automatic check on Celo's public explorer.")} <a href="${u("/transparencia#externos")}">${s("Ver la regla y la lista", "See the rule and the list")}</a>.`)}
+${row(rampDone ? html`<span class="chip ok">${s("Verificado", "Verified")}</span>` : html`<span class="chip wait">${s("Sin uso real aún", "Not used for real yet")}</span>`, html`<b>${s("Pago por transferencia vía Ripio:", "Bank transfer through Ripio:")}</b> ${rampDone ? s(`${o.rampPayments} pago(s) verificados por este camino.`, `${o.rampPayments} verified payment(s) this way.`) : s("armado y conectado, pero ningún inquilino real lo completó todavía de punta a punta.", "built and wired in, but no real tenant has completed it end to end yet.")}`)}
+${row(html`<span class="chip wait">${s("Con simulador", "Stub-tested")}</span>`, html`<b>MiniPay</b> ${s("probado con un simulador de billetera, todavía no dentro de MiniPay. El gas en dólares digitales está hecho y probado una vez, apagado en uso normal.", "tested with a wallet stub, not yet inside MiniPay. Gas paid in digital dollars is built and was tested once; it is off in normal running.")}`)}
+</ul><p class="real-foot"><a href="${u("/transparencia")}">${s("Todo, con su fuente, en Transparencia", "Everything, with its source, on the Transparency page")}</a> →</p></div></div></section>`;
   const faq = [
     [s("¿Mi inquilino necesita saber de cripto?", "Does my tenant need to know about crypto?"), s("No. Paga por transferencia a través de Ripio, que convierte los pesos en wARS, un peso digital 1 a 1. La primera vez Ripio le pide validar su identidad.", "No. They pay by bank transfer through Ripio, which turns the pesos into wARS, a digital peso worth one peso. The first time, Ripio asks them to verify their identity.")],
     [s("¿Quién tiene la plata?", "Who holds the money?"), s("Cada contrato tiene su propia cuenta en la red Celo, un contrato inteligente que solo te puede pagar a vos. El alquiler nunca pasa por la billetera del agente; a ella solo va la comisión del 0,3 %. El agente puede repartir lo cobrado, pero no puede mandarlo a otro lado, y vos podés retirar todo o sacarlo del medio cuando quieras.", "Each lease has its own account on Celo, a smart contract that can only pay you. The rent never passes through the agent's wallet; only the 0.3% fee goes there. The agent can split what came in but cannot send it anywhere else, and you can withdraw everything or remove the agent at any time.")],
@@ -410,13 +477,15 @@ async function pageHome(env, X, waitUntil) {
     [s("¿Y si el pago entra incompleto?", "What if the payment comes in short?"), s("Queda en la cuenta del contrato y lo ves como pago parcial. El agente reparte cuando entra el resto, y vos podés retirarlo antes con tu billetera.", "It stays in the lease account and shows as part paid. The agent splits it when the rest arrives, and you can withdraw it earlier with your wallet.")],
     [s("¿Reemplaza la factura?", "Does it replace the invoice?"), s("No. El recibo de Al Día es un comprobante informativo. Lo que tengas que facturar o declarar lo seguís haciendo como siempre.", "No. Al Día's receipt is for information. Whatever you have to invoice or declare, you keep doing as usual.")],
   ];
-  const faqHtml = html`<section class="faq"><h2>${s("Preguntas", "Questions")}</h2>${faq.map(([q, a]) => html`<h3>${q}</h3><p class="muted">${a}</p>`)}<h3>${s("¿Ya lo usa gente?", "Is anyone using it yet?")}</h3><p class="muted">${s("Estamos arrancando: mirá ", "We are just starting: see ")}<a href="#real">${s("qué es real hoy", "what is real today")}</a>${s(". En Transparencia publicamos cuántos contratos y pagos son reales y cuáles son pruebas nuestras.", ". The Transparency page shows how many leases and payments are real and which are our own tests.")}</p></section>`;
+  const faqHtml = html`<section class="band alt"><div class="wrap faq-wrap"><div class="sec-head"><p class="kicker">${s("Preguntas", "Questions")}</p><h2>${s("Lo que preguntan antes de empezar", "What people ask before they start")}</h2><p>${s("Propietarios e inquilinos, con respuestas cortas.", "Landlords and tenants, with short answers.")}</p></div><div class="faq">${faq.map(([q, a]) => html`<div class="q"><h3>${q}</h3><p>${a}</p></div>`)}<div class="q"><h3>${s("¿Ya lo usa gente?", "Is anyone using it yet?")}</h3><p>${s("Estamos arrancando: mirá ", "We are just starting: see ")}<a href="#real">${s("qué es real hoy", "what is real today")}</a>${s(". En Transparencia publicamos cuántos contratos y pagos son reales y cuáles son pruebas nuestras.", ". The Transparency page shows how many leases and payments are real and which are our own tests.")}</p></div></div></div></section>`;
+  const cta = html`<section class="wrap"><div class="cta-band"><div><h2>${s("Probalo con tu propia billetera", "Try it with your own wallet")}</h2><p>${s("Un alquiler real de 1.000 wARS en Celo con vos como propietario: el agente lo cobra, lo liquida y te devuelve 997 con su recibo.", "A real 1,000 wARS rent on Celo with you as the landlord: the agent collects it, settles it and sends 997 back to you with a receipt.")}</p></div><div class="row"><a class="btn" href="${u("/probar")}">${s("Empezar la prueba", "Start the test")} <span class="arr">→</span></a><a class="btn ghost" href="${u("/calculadora")}">${s("Calculadora", "Calculator")}</a></div></div></section>`;
   return {
     title: s("Al Día · El alquiler que se actualiza y se cobra solo", "Al Día · Rent that updates and collects itself"),
     ogTitle: "Al Día",
     description: s("Para propietarios en Argentina: un agente en Celo calcula cada aumento con el índice oficial, cobra en pesos y deja el recibo. Probalo en 2 minutos con 1.000 wARS.",
       "For landlords in Argentina: an agent on Celo works out each increase from the official index, collects in pesos and issues the receipt. Try it in 2 minutes with 1,000 wARS."),
-    body: html`${hero}${steps}${real}${problem}${faqHtml}`,
+    home: true,
+    body: html`${hero}${steps}${problem}${real}${faqHtml}${cta}`,
   };
 }
 
@@ -451,6 +520,12 @@ function calcResult(X, lease, idx) {
   const next = addMonths(r.adjustmentMonth, lease.periodMonths);
   return html`<div class="card" id="calc-result"><div class="muted small">${s(`Alquiler de ${X.month(m)}`, `Rent for ${X.month(m)}`)}</div>${r.missing ? "" : html`<div class="amount">${X.ars(r.amount)}</div>`}${explainRent(X, r)}<p class="muted small" style="margin-top:12px">${s("Próximo aumento", "Next increase")}: ${X.month(next)}.</p><a class="btn block" href="${u("/nuevo")}">${s("Que se haga solo todos los meses", "Have it done for you every month")}</a></div>`;
 }
+// What the result column shows before there is a result. web/app.js draws the same box (calcEmpty) when inputs are cleared.
+function calcEmpty(X, withExample) {
+  const { s } = X;
+  return html`<div class="card result-empty" id="calc-empty"><span class="ico">${icon("calc")}</span><h3>${s("Tu resultado aparece acá", "Your result shows here")}</h3><p class="small muted">${s("Poné el alquiler inicial y la fecha de inicio: te mostramos el monto de este mes, cuánto aumentó y de dónde sale el número.", "Enter the starting rent and the start date: you get this month's amount, how much it went up and where the number comes from.")}</p>${
+    withExample ? html`<a class="small" href="#ejemplo">${s("Ver un ejemplo resuelto", "See a worked example")} ↓</a>` : ""}</div>`;
+}
 
 // One worked example: the sample tenant's IPC rent, recomputed here from the official series and compared with the amount
 // the agent charged. Shown only for a builder-test lease.
@@ -464,15 +539,16 @@ export function workedExample(pub, idx) {
   const from = idx.ipc[r.refFrom];
   const to = idx.ipc[r.refTo];
   if (!fin(from) || !fin(to)) return null;
-  return { terms, r, from, to, factor: to / from, agent: fin(pub.current.amount) ? pub.current.amount : null, label: str(pub.propertyLabel, 80) };
+  return { terms, r, from, to, factor: to / from, agent: fin(pub.current.amount) ? pub.current.amount : null, label: str(pub.propertyLabel, 80), series: seriesBetween(idx.ipc, r.refFrom, r.refTo) };
 }
 function exampleCard(X, ex) {
   const { s, u } = X;
   if (!ex) return "";
-  const { terms, r, from, to, factor, agent, label } = ex;
+  const { terms, r, from, to, factor, agent, label, series } = ex;
   const period = ((periods(X).find(([n]) => n === terms.periodMonths) || [0, ""])[1]).toLowerCase();
-  return html`<section class="card" id="ejemplo"><h2>${s("Ejemplo resuelto", "Worked example")}</h2><p class="small muted">${s("El ", "The ")}<a href="${u(`/pagar/${SAMPLE_TENANT}`)}">${s("contrato de prueba", "test lease")}</a> «${agentText(X, label, 80)}»${s(", con los datos que publica el agente, recalculado acá con los índices oficiales.", ", from the data the agent publishes, recomputed here from the official indices.")}</p><dl class="kv"><dt>${s("Alquiler inicial", "Starting rent")}</dt><dd>${X.ars(terms.baseRent)}</dd><dt>${s("Inicio del contrato", "Lease start")}</dt><dd>${X.month(terms.startDate.slice(0, 7))}</dd><dt>${s("Índice", "Index")}</dt><dd>${indexNames(X).IPC}, ${period}</dd><dt>${s("Alquiler de", "Rent for")}</dt><dd>${X.month(r.month)}</dd></dl><p class="small" style="margin:12px 0 4px">${s(`IPC de ${X.month(r.refTo)}`, `IPC ${X.month(r.refTo)}`)}: ${X.level(to)}<br>${s(`IPC de ${X.month(r.refFrom)}`, `IPC ${X.month(r.refFrom)}`)}: ${X.level(from)}</p><p class="small" style="margin:0 0 4px">${X.level(to)} ÷ ${X.level(from)} = ${X.factor6(factor)}</p><p class="small" style="margin:0">${X.ars(terms.baseRent)} × ${X.factor6(factor)} = <b>${X.ars(r.amount)}</b>${s(", redondeado al peso.", ", rounded to the peso.")}</p>${explainRent(X, r)}${
-    agent === null ? "" : html`<p class="small" style="margin:12px 0 0">${agent === r.amount ? s(`El agente cobró ${X.ars(agent)} en ese contrato: coincide.`, `The agent charged ${X.ars(agent)} on that lease: it matches.`) : s(`El agente publicó ${X.ars(agent)} para ese mes.`, `The agent published ${X.ars(agent)} for that month.`)}</p>`}</section>`;
+  return html`<section class="card" id="ejemplo"><div class="example"><div><p class="kicker">${s("Con datos publicados", "From published data")}</p><h2>${s("Ejemplo resuelto", "Worked example")}</h2><p class="small muted">${s("El ", "The ")}<a href="${u(`/pagar/${SAMPLE_TENANT}`)}">${s("contrato de prueba", "test lease")}</a> «${agentText(X, label, 80)}»${s(", con los datos que publica el agente, recalculado acá con los índices oficiales.", ", from the data the agent publishes, recomputed here from the official indices.")}</p><dl class="kv"><dt>${s("Alquiler inicial", "Starting rent")}</dt><dd>${X.ars(terms.baseRent)}</dd><dt>${s("Inicio del contrato", "Lease start")}</dt><dd>${X.month(terms.startDate.slice(0, 7))}</dd><dt>${s("Índice", "Index")}</dt><dd>${indexNames(X).IPC}, ${period}</dd><dt>${s("Alquiler de", "Rent for")}</dt><dd>${X.month(r.month)}</dd></dl>${explainRent(X, r)}</div>
+<div class="eq">${series ? html`<div class="calc-head"><span>${s("IPC nivel general, INDEC", "IPC, national, INDEC")}</span><b>+${X.pctf((factor - 1) * 100)}</b></div>${sparkSvg(series.levels)}<div class="spark-x"><span>${X.monthShort(series.months[0])}</span><span>${X.monthShort(series.months.at(-1))}</span></div>` : ""}<p class="lv"><span>${s(`IPC de ${X.month(r.refTo)}`, `IPC ${X.month(r.refTo)}`)}:</span> <b>${X.level(to)}</b></p><p class="lv"><span>${s(`IPC de ${X.month(r.refFrom)}`, `IPC ${X.month(r.refFrom)}`)}:</span> <b>${X.level(from)}</b></p><p class="lv"><span>${s("Factor", "Factor")}</span> <b>${X.level(to)} ÷ ${X.level(from)} = ${X.factor6(factor)}</b></p><p class="res">${X.ars(terms.baseRent)} × ${X.factor6(factor)} = <b>${X.ars(r.amount)}</b>${s(", redondeado al peso.", ", rounded to the peso.")}</p>${
+    agent === null ? "" : html`<p class="small match" style="margin:14px 0 0">${agent === r.amount ? html`<span class="chip ok">${icon("check")}${s("Coincide", "Matches")}</span> ` : ""}${agent === r.amount ? s(`El agente cobró ${X.ars(agent)} en ese contrato: coincide.`, `The agent charged ${X.ars(agent)} on that lease: it matches.`) : s(`El agente publicó ${X.ars(agent)} para ese mes.`, `The agent published ${X.ars(agent)} for that month.`)}</p>`}</div></div></section>`;
 }
 
 async function pageCalc(env, url, X) {
@@ -480,19 +556,20 @@ async function pageCalc(env, url, X) {
   const [idx, pub] = await Promise.all([kv(env, "indices"), kv(env, `pub:${SAMPLE_TENANT}`)]);
   const { raw, lease } = calcInput(url.searchParams);
   const indexOk = idx && idx.ipc && idx.icl && isMonth(idx.ipcLast);
+  const ex = indexOk ? workedExample(pub, idx) : null;
   const opt = (list, cur) => list.map(([v, t]) => html`<option value="${v}"${String(v) === String(cur) ? html` selected` : ""}>${t}</option>`);
-  const field = (label, control, hint) => html`<div><label>${label}${hint ? html`<span class="hint">${hint}</span>` : ""}${control}</label></div>`;
+  const field = (label, control, hint, cls) => html`<div${cls ? html` class="${cls}"` : ""}><label>${label}${hint ? html`<span class="hint">${hint}</span>` : ""}${control}</label></div>`;
   const form = indexOk
-    ? html`<form class="card" id="calc" method="get" action="/calculadora">${X.en ? html`<input type="hidden" name="lang" value="en">` : ""}${
+    ? html`<form class="card" id="calc" method="get" action="/calculadora">${X.en ? html`<input type="hidden" name="lang" value="en">` : ""}<div class="fields">${
       field(s("Alquiler inicial del contrato", "Starting rent in the lease"), html`<input name="alquiler" inputmode="numeric" placeholder="${s("$ 500.000", "ARS 500,000")}" autocomplete="off" value="${raw.alquiler}">`)}${
       field(s("Fecha de inicio del contrato", "Lease start date"), html`<input name="inicio" type="date" value="${raw.inicio}">`)}${
       field(s("¿Con qué índice aumenta?", "Which index raises it?"), html`<select name="indice">${opt(Object.entries(indexNames(X)), raw.indice)}</select>`)}${
       field(s("¿Cada cuánto aumenta?", "How often does it go up?"), html`<select name="cada">${opt(periods(X), raw.cada)}</select>`)}${
-      field(s("Meses de IPC", "IPC months"), html`<select name="meses">${opt([[2, s("El último publicado al inicio del mes (lo más común)", "The latest published at the start of the month (most common)")], [1, s("Incluye el mes anterior al aumento", "Includes the month before the increase")]], raw.meses)}</select>`, s("Solo para IPC.", "IPC only."))}${
-      field(s("Porcentaje de cada aumento", "Percentage of each increase"), html`<input name="pct" inputmode="decimal" placeholder="10" value="${raw.pct}">`, s("Solo si aumenta un porcentaje fijo.", "Only for a fixed percentage."))}<button class="btn block" type="submit" style="margin-top:14px">${s("Calcular", "Calculate")}</button><p class="tiny" style="margin:12px 0 0">${s(`IPC disponible hasta ${X.month(idx.ipcLast)}. Datos leídos de INDEC y BCRA el ${str(idx.retrievedAt, 10)}.`, `IPC available up to ${X.month(idx.ipcLast)}. Data read from INDEC and BCRA on ${str(idx.retrievedAt, 10)}.`)}</p></form>`
+      field(s("Meses de IPC", "IPC months"), html`<select name="meses">${opt([[2, s("El último publicado al inicio del mes (lo más común)", "The latest published at the start of the month (most common)")], [1, s("Incluye el mes anterior al aumento", "Includes the month before the increase")]], raw.meses)}</select>`, s("Solo para IPC.", "IPC only."), "full")}${
+      field(s("Porcentaje de cada aumento", "Percentage of each increase"), html`<input name="pct" inputmode="decimal" placeholder="10" value="${raw.pct}">`, s("Solo si aumenta un porcentaje fijo.", "Only for a fixed percentage."), "full")}</div><button class="btn block" type="submit">${s("Calcular", "Calculate")}</button><p class="tiny foot-note">${s(`IPC disponible hasta ${X.month(idx.ipcLast)}. Datos leídos de INDEC y BCRA el ${str(idx.retrievedAt, 10)}.`, `IPC available up to ${X.month(idx.ipcLast)}. Data read from INDEC and BCRA on ${str(idx.retrievedAt, 10)}.`)}</p></form>`
     : html`<div class="card" id="calc"><div class="note err">${s("No pudimos traer los índices. Probá en un rato.", "We could not load the indices. Please try again later.")}</div></div>`;
-  const ex = indexOk ? workedExample(pub, idx) : null;
-  const body = html`<h1>${s("Calculadora de aumento", "Rent increase calculator")}</h1><p class="muted">${s("Gratis y con datos oficiales. No hace falta registrarse.", "Free, official data, no sign-up.")}</p>${form}${indexOk && lease ? calcResult(X, lease, idx) : ""}${exampleCard(X, ex)}`;
+  const out = indexOk ? (lease ? calcResult(X, lease, idx) : calcEmpty(X, !!ex)) : "";
+  const body = html`<div class="phead"><p class="kicker">${s("IPC, ICL o porcentaje fijo", "IPC, ICL or a fixed percentage")}</p><h1>${s("Calculadora de aumento", "Rent increase calculator")}</h1><p>${s("Gratis y con datos oficiales. No hace falta registrarse.", "Free, official data, no sign-up.")}</p></div><div class="cols calc-page">${form}<div class="sticky" id="calc-out" aria-live="polite">${out}</div></div>${exampleCard(X, ex)}`;
   const exText = ex ? s(` Ejemplo resuelto: ${X.ars(ex.terms.baseRent)} desde ${X.month(ex.terms.startDate.slice(0, 7))} con IPC cada ${ex.terms.periodMonths} meses da ${X.ars(ex.r.amount)} en ${X.month(ex.r.month)}.`,
     ` Worked example: ${X.ars(ex.terms.baseRent)} from ${X.month(ex.terms.startDate.slice(0, 7))} with IPC every ${ex.terms.periodMonths} months gives ${X.ars(ex.r.amount)} in ${X.month(ex.r.month)}.`) : "";
   return {
@@ -527,9 +604,9 @@ function calcUseCard(X, c) {
 function rentsTable(X, rents) {
   const { s, u } = X;
   if (!rents.length) return "";
-  return html`<section class="card" id="pruebas"><h3>${s("Alquileres de prueba cobrados", "Test rents collected")}</h3><p class="small muted">${s("Los pagamos nosotros con wARS propios para probar el ciclo completo. Cada uno tiene su recibo y sus operaciones en la red Celo.", "We paid these ourselves with our own wARS to run the full cycle. Each one has its receipt and its Celo transactions.")}</p><table><tr><th>${s("Contrato", "Lease")}</th><th class="r">${s("Monto", "Amount")}</th><th class="r">${s("En Celo", "On Celo")}</th></tr>${rents.map((x) => html`<tr><td><a href="${u(x.receipt)}">${agentText(X, x.label, 80)}</a><br><span class="tiny">${X.month(x.month)}${x.route ? html` · ${agentText(X, x.route, 40)}` : ""}</span></td><td class="r">${X.ars(x.amount)}</td><td class="r">${
-    x.paymentTxs.map((t, i) => html`<a href="${txUrl(t)}" rel="noopener">${s("pago", "payment")}${x.paymentTxs.length > 1 ? " " + (i + 1) : ""}</a><br>`)}${x.settleTx ? html`<a href="${txUrl(x.settleTx)}" rel="noopener">${s("liquidación", "settlement")}</a><br>` : ""}${
-    x.lease ? html`<a href="${addrUrl(x.lease)}" rel="noopener">${s("cuenta", "account")}</a>` : ""}</td></tr>`)}</table></section>`;
+  return html`<section class="card wide" id="pruebas"><h3>${s("Alquileres de prueba cobrados", "Test rents collected")}</h3><p class="small muted">${s("Los pagamos nosotros con wARS propios para probar el ciclo completo. Cada uno tiene su recibo y sus operaciones en la red Celo.", "We paid these ourselves with our own wARS to run the full cycle. Each one has its receipt and its Celo transactions.")}</p><table><tr><th>${s("Contrato", "Lease")}</th><th class="r">${s("Monto", "Amount")}</th><th class="r">${s("En Celo", "On Celo")}</th></tr>${rents.map((x) => html`<tr><td><a href="${u(x.receipt)}">${agentText(X, x.label, 80)}</a><br><span class="tiny">${X.month(x.month)}${x.route ? html` · ${agentText(X, x.route, 40)}` : ""}</span></td><td class="r">${X.ars(x.amount)}</td><td class="r"><span class="txl">${
+    x.paymentTxs.map((t, i) => html`<a href="${txUrl(t)}" rel="noopener">${s("pago", "payment")}${x.paymentTxs.length > 1 ? " " + (i + 1) : ""}</a>`)}${x.settleTx ? html`<a href="${txUrl(x.settleTx)}" rel="noopener">${s("liquidación", "settlement")}</a>` : ""}${
+    x.lease ? html`<a href="${addrUrl(x.lease)}" rel="noopener">${s("cuenta", "account")}</a>` : ""}</span></td></tr>`)}</table></section>`;
 }
 
 async function pageTransparency(env, X, waitUntil) {
@@ -555,13 +632,14 @@ async function pageTransparency(env, X, waitUntil) {
   const fresh = [at ? s(`el agente dio su última vuelta a las ${at} UTC`, `the agent's last check ran at ${at} UTC`) : null,
     o.checkedAt ? s(`la revisión de pagadores externos corrió a las ${o.checkedAt.slice(0, 16).replace("T", " ")} UTC`, `the outside-payer check ran at ${o.checkedAt.slice(0, 16).replace("T", " ")} UTC`) : null].filter(Boolean);
   const tile = (v, label) => html`<div class="stat"><b>${v}</b><span class="small muted">${label}</span></div>`;
-  const body = html`<h1>${s("Transparencia", "Transparency")}</h1><p class="muted">${s("Lo que se puede comprobar, con su fuente. Separamos lo nuestro de lo real.", "What can be checked, with its source. Our own tests are kept apart from real use.")}</p>${
-    fresh.length ? html`<p class="tiny" id="fresh">${s("Al día: ", "Up to date: ")}${fresh.join(s("; ", "; "))}.</p>` : ""}<section class="stats">${
+  const body = html`<div class="phead"><p class="kicker">${s("Datos públicos, con su fuente", "Public data, with its source")}</p><h1>${s("Transparencia", "Transparency")}</h1><p>${s("Lo que se puede comprobar, con su fuente. Separamos lo nuestro de lo real.", "What can be checked, with its source. Our own tests are kept apart from real use.")}</p></div>${
+    fresh.length ? html`<p class="fresh" id="fresh">${s("Al día: ", "Up to date: ")}${fresh.join(s("; ", "; "))}.</p>` : ""}<section class="stats">${
     tile(n(st.paymentsTest), s("alquileres de prueba nuestros, cobrados en Celo", "test rents of ours, collected on Celo"))}${
     tile(n(st.leasesTest), s("contratos de prueba nuestros", "test leases of ours"))}${
     tile(o.count, s("pagadores externos verificados", "verified outside payers"))}${
     tile(o.payments, s("pagos externos verificados", "verified outside payments"))}</section>
-<section class="card" style="margin-top:14px"><h3>${s("De dónde salen estos números", "Where these numbers come from")}</h3><p class="small">${s("Un pago cuenta como externo solo si pasa el control de abajo, que se hace solo con datos públicos de la red. Nuestras pruebas se cuentan aparte, como pruebas nuestras.", "A payment counts as outside only if it passes the check below, which uses public chain data alone. Our tests are counted separately, as ours.")}</p>${
+<div class="tgrid">
+<section class="card"><h3>${s("De dónde salen estos números", "Where these numbers come from")}</h3><p class="small">${s("Un pago cuenta como externo solo si pasa el control de abajo, que se hace solo con datos públicos de la red. Nuestras pruebas se cuentan aparte, como pruebas nuestras.", "A payment counts as outside only if it passes the check below, which uses public chain data alone. Our tests are counted separately, as ours.")}</p>${
     counts ? html`<p class="small" id="conteo">${testLeaseLine(X, counts, null)}</p>` : ""}${
     st.updatedAt ? html`<p class="tiny" style="margin:0">${s("Los números del agente cambiaron por última vez el", "The agent's numbers last changed on")} ${str(st.updatedAt, 30)}.</p>` : ""}</section>
 ${calcUseCard(X, cu)}
@@ -570,7 +648,8 @@ ${ipcLastOk ? html`<section class="card"><h3>${s("Índices oficiales", "Official
 <section class="card"><h3>${s("En la red", "On chain")}</h3><dl class="kv"><dt>${s("Agente", "Agent")}</dt><dd><a href="${LINKS.erc8004}" rel="noopener">ERC-8004 ${s(`n.º ${ONCHAIN.agentId}`, `#${ONCHAIN.agentId}`)}</a></dd><dt>${s("Billetera del agente", "Agent wallet")}</dt><dd><a href="${addrUrl(ONCHAIN.agentWallet)}" rel="noopener" class="mono">${short(ONCHAIN.agentWallet)}</a></dd><dt>${s("Fábrica de cuentas", "Lease factory")}</dt><dd><a href="${addrUrl(ONCHAIN.factory.toLowerCase())}" rel="noopener" class="mono">${short(ONCHAIN.factory.toLowerCase())}</a></dd></dl>${
     leases.length ? html`<table style="margin-top:10px">${leases.map((l, i) => html`<tr><td>${agentText(X, l.label, 80)}</td><td class="r">${agentText(X, l.kind, 40)}${counts ? (leasePaid[i] ? s(" · cobrado", " · paid") : s(" · sin pago", " · never paid")) : ""}</td></tr>`)}</table>` : ""}</section>
 ${rentsTable(X, rents)}
-${calls ? html`<section class="card"><h3>${s("Servicios que pagamos", "Services we paid for")}</h3><p class="small muted">${s(`${calls.count} llamadas pagas por x402 en Celo, por ${X.usd3(calls.usd)} en total, desde la billetera del agente.`, `${calls.count} paid x402 calls on Celo, ${X.usd3(calls.usd)} in total, from the agent wallet.`)}</p><table>${recent.map((c) => html`<tr><td>${agentText(X, c.service, 120)}</td><td class="r">${X.usd3(c.usd)}</td><td class="r">${isTx(c.tx) ? html`<a href="${txUrl(c.tx)}" rel="noopener">tx</a>` : "—"}</td></tr>`)}</table></section>` : ""}`;
+${calls ? html`<section class="card wide"><h3>${s("Servicios que pagamos", "Services we paid for")}</h3><p class="small muted">${s(`${calls.count} llamadas pagas por x402 en Celo, por ${X.usd3(calls.usd)} en total, desde la billetera del agente.`, `${calls.count} paid x402 calls on Celo, ${X.usd3(calls.usd)} in total, from the agent wallet.`)}</p><table>${recent.map((c) => html`<tr><td>${agentText(X, c.service, 120)}</td><td class="r">${X.usd3(c.usd)}</td><td class="r">${isTx(c.tx) ? html`<a href="${txUrl(c.tx)}" rel="noopener" class="mono">${c.tx.slice(0, 8)}…</a>` : "—"}</td></tr>`)}</table></section>` : ""}
+</div>`;
   const parts = [s(`Pagadores externos verificados: ${o.count}. Pagos externos verificados: ${o.payments}. Pruebas nuestras: ${n(st.leasesTest)} contratos y ${n(st.paymentsTest)} pagos.`,
     `Verified outside payers: ${o.count}. Verified outside payments: ${o.payments}. Our tests: ${n(st.leasesTest)} leases and ${n(st.paymentsTest)} payments.`)];
   if (calls) parts.push(s(`${calls.count} llamadas pagas por x402.`, `${calls.count} paid x402 calls.`));
@@ -592,7 +671,7 @@ async function pagePay(env, id, X) {
   const [pub, probar] = await Promise.all([kv(env, `pub:${id}`), probarId(env, id)]);
   if (!pub) {
     if (await env.KV.get(`lease:${id}`)) {
-      return { title: s("Pagar alquiler · Al Día", "Pay rent · Al Día"), description: s("Estamos preparando este alquiler.", "We are setting up this rent."), noindex: true, refresh: 20,
+      return { title: s("Pagar alquiler · Al Día", "Pay rent · Al Día"), description: s("Estamos preparando este alquiler.", "We are setting up this rent."), noindex: true, refresh: 20, narrow: true,
         body: html`<h1>${s("Estamos preparando este alquiler", "We are setting up this rent")}</h1><p class="muted">${s("Tarda menos de dos minutos. Esta página se actualiza sola.", "It takes less than two minutes. This page refreshes by itself.")}</p>` };
     }
     return { status: 404, title: s("No encontramos este alquiler · Al Día", "We could not find this rent · Al Día"), description: s("Revisá el link que te pasaron.", "Check the link you were sent."), noindex: true,
@@ -611,15 +690,15 @@ async function pagePay(env, id, X) {
   // A builder-test lease shows how a tenant sees the rent, but it must never invite a real payment: no pay buttons.
   const payBlock = !open || !collector ? "" : pub.builderTest === true
     ? html`<section class="note" id="no-pay"><b>${s("Contrato de prueba de Swift Bot Labs: no pagues acá.", "Swift Bot Labs test lease: do not pay here.")}</b> ${s("Muestra cómo ve su alquiler un inquilino, con un cálculo real; no hay propietario ni inquilino reales. Para probar un pago de verdad, usá la prueba abierta: pagás 1.000 wARS y te vuelven a tu billetera.", "It shows how a tenant sees the rent, with real arithmetic; there is no real landlord or tenant. To try a real payment, use the open test: you pay 1,000 wARS and they come back to your wallet.")}<div style="margin-top:10px"><a class="btn block" href="${u("/probar")}">${s("Probalo con 1.000 wARS", "Try it with 1,000 wARS")}</a></div></section>`
-    : html`<section><a class="btn block" href="${rampUrl(owed, collector)}" rel="noopener">${s("Pagar por transferencia", "Pay by bank transfer")}</a><p class="small muted" style="margin-top:8px">${s("Te lleva a Ripio. Pagás en pesos desde tu banco o billetera y el pago llega directo a la cuenta de este alquiler. La primera vez Ripio te pide validar tu identidad.", "It takes you to Ripio. You pay in pesos from your bank or wallet and the payment goes straight to this rent's account. The first time, Ripio asks you to verify your identity.")}</p><div id="pay-wallet" data-id="${id}" data-collector="${collector}" data-owed="${owed}" data-lang="${X.lang}"></div><a class="btn ghost block" style="margin-top:10px" href="${`${BOT}?start=t_${id}`}" rel="noopener">${s("Avisame por Telegram cuando venza", "Remind me on Telegram when it is due")}</a></section>`;
+    : html`<section class="card"><h3>${s("Cómo pagar", "How to pay")}</h3><a class="btn block" href="${rampUrl(owed, collector)}" rel="noopener">${s("Pagar por transferencia", "Pay by bank transfer")}</a><p class="small muted" style="margin-top:8px">${s("Te lleva a Ripio. Pagás en pesos desde tu banco o billetera y el pago llega directo a la cuenta de este alquiler. La primera vez Ripio te pide validar tu identidad.", "It takes you to Ripio. You pay in pesos from your bank or wallet and the payment goes straight to this rent's account. The first time, Ripio asks you to verify your identity.")}</p><div id="pay-wallet" data-id="${id}" data-collector="${collector}" data-owed="${owed}" data-lang="${X.lang}"></div><a class="btn ghost block" style="margin-top:10px" href="${`${BOT}?start=t_${id}`}" rel="noopener">${s("Avisame por Telegram cuando venza", "Remind me on Telegram when it is due")}</a></section>`;
   const body = html`${probar && !pub.builderTest ? html`<div class="note">${s("Prueba abierta de Al Día: quien paga es también el propietario, así que los wARS vuelven a su billetera, menos el 0,3 %.", "Al Día open test: the payer is also the landlord, so the wARS go back to their wallet, less 0.3%.")} <a href="${u(`/probar/${probar}`)}">${s("Ver los pasos", "See the steps")}</a>.</div>` : ""}${
-    pub.closed ? html`<div class="note warn">${s("Este alquiler ya no se cobra por Al Día. Consultá con tu propietario antes de pagar.", "This rent is no longer collected through Al Día. Check with your landlord before paying.")}</div>` : ""}<h1>${c ? s(`Alquiler de ${X.month(c.month, false)}`, `${X.month(c.month, false)} rent`) : s("Alquiler", "Rent")}</h1><p class="muted">${label}</p>${
-    c ? html`<section class="card">${statusChip(X, c.status)}<div class="amount">${X.ars(open ? owed : amount)}</div>${open && isDay(c.dueDate) ? html`<p class="muted">${s(`Vence el ${X.dayMonth(c.dueDate)}.`, `Due ${X.dayMonth(c.dueDate)}.`)}</p>` : ""}${
+    pub.closed ? html`<div class="note warn">${s("Este alquiler ya no se cobra por Al Día. Consultá con tu propietario antes de pagar.", "This rent is no longer collected through Al Día. Check with your landlord before paying.")}</div>` : ""}<div class="cols"><div class="stack"><section class="card doc"><div class="doc-head"><div><p class="kicker">${label}</p><h1>${c ? s(`Alquiler de ${X.month(c.month, false)}`, `${X.month(c.month, false)} rent`) : s("Alquiler", "Rent")}</h1></div>${c ? statusChip(X, c.status) : ""}</div>${
+    c ? html`<div class="amount">${X.ars(open ? owed : amount)}</div>${open && isDay(c.dueDate) ? html`<p class="muted">${s(`Vence el ${X.dayMonth(c.dueDate)}.`, `Due ${X.dayMonth(c.dueDate)}.`)}</p>` : ""}${
       received && open ? html`<p class="small">${s(`Ya recibimos ${X.ars(received)} de ${X.ars(amount)}.`, `We have received ${X.ars(received)} of ${X.ars(amount)}.`)}</p>` : ""}<details${det && det.adjustments > 0 && det.adjustmentMonth === c.month ? html` open` : ""}><summary>${s("¿Por qué este monto?", "Why this amount?")}</summary>${explainRent(X, det)}</details>${clauseNote(X, c)}${
-      isMonth(pub.nextAdjustment) ? html`<p class="small muted" style="margin:10px 0 0">${s("Próximo aumento", "Next increase")}: ${X.month(pub.nextAdjustment)}.</p>` : ""}</section>` : ""}${payBlock}${
+      isMonth(pub.nextAdjustment) ? html`<p class="small muted" style="margin:10px 0 0">${s("Próximo aumento", "Next increase")}: ${X.month(pub.nextAdjustment)}.</p>` : ""}` : ""}</section></div><aside class="stack">${payBlock}${
     pub.builderTest === true && !payBlock ? html`<div class="note">${s("Contrato de prueba de Swift Bot Labs: muestra cómo ve su alquiler un inquilino. No hay propietario ni inquilino reales.", "Swift Bot Labs test lease: it shows how a tenant sees the rent. There is no real landlord or tenant.")}</div>` : ""}${
     paid.length ? html`<section class="card"><h3>${s("Recibos", "Receipts")}</h3><table>${paid.map((x) => html`<tr><td>${X.month(x.month)}</td><td class="r">${X.ars(x.amount)}</td><td class="r"><a href="${u(`/recibo/${id}/${x.month}`)}">${s("Ver", "View")}</a></td></tr>`)}</table></section>` : ""}${
-    collector ? html`<p class="tiny">${s("Esta cuenta solo le puede pagar al propietario.", "This account can only pay the landlord.")} <a href="${addrUrl(collector)}" rel="noopener">${s("Ver la cuenta en Celo", "See the account on Celo")}</a>.</p>` : ""}`;
+    collector ? html`<p class="tiny">${s("Esta cuenta solo le puede pagar al propietario.", "This account can only pay the landlord.")} <a href="${addrUrl(collector)}" rel="noopener">${s("Ver la cuenta en Celo", "See the account on Celo")}</a>.</p>` : ""}</aside></div>`;
   const month = c ? X.month(c.month, false) : "";
   const descParts = [];
   if (c) {
@@ -680,10 +759,10 @@ async function pageReceipt(env, id, month, X) {
   const pays = [...(Array.isArray(r.paymentTxs) ? r.paymentTxs : []), ...(Array.isArray(r.paymentTxsLate) ? r.paymentTxsLate : [])].filter(isTx);
   const label = agentText(X, r.propertyLabel, 80);
   const rate = fin(r.rate) ? r.rate : null;
-  const body = html`${probar && !r.builderTest ? html`<div class="note">${s("Recibo de una prueba abierta de Al Día: quien pagó es también el propietario.", "Receipt of an Al Día open test: the payer is also the landlord.")} <a href="${u(`/probar/${probar}`)}">${s("Ver los pasos", "See the steps")}</a>.</div>` : ""}<section class="card"><h1>${s(`Recibo de ${X.month(month)}`, `Receipt for ${X.month(month)}`)}</h1><p class="muted">${label}</p><div class="amount">${X.ars(r.received)}</div><dl class="kv"><dt>${s("Alquiler del mes", "Rent for the month")}</dt><dd>${X.ars(r.amount)}</dd><dt>${s("Cobrado el", "Collected on")}</dt><dd>${X.dayMonth(r.paidAt)}</dd><dt>${s("Comisión Al Día", "Al Día fee")}</dt><dd>${X.ars(r.fee)}</dd><dt>${s("Al propietario en pesos", "To the landlord in pesos")}</dt><dd>${X.ars(r.pesoToLandlord)}</dd><dt>${s("Al propietario en dólares", "To the landlord in dollars")}</dt><dd>${fin(r.dollarToLandlord) && r.dollarToLandlord ? X.usd(r.dollarToLandlord) : "—"}</dd>${
-    rate ? html`<dt>${s("Tipo de cambio", "Exchange rate")}</dt><dd>${X.ars2(rate)} ${s("por USD₮", "per USD₮")}</dd><dt>${s("Convertido en", "Converted on")}</dt><dd>${agentText(X, r.route, 40)}</dd>` : ""}</dl><details open><summary>${s("Cómo se calculó el monto", "How the amount was worked out")}</summary>${explainRent(X, r.detail)}</details><p class="small muted" style="margin-top:14px">${s("Comprobantes en la red Celo", "Proof on Celo")}: ${
-    pays.map((t, i) => html`<a href="${txUrl(t)}" rel="noopener">${s("pago", "payment")} ${i + 1}</a>, `)}${isTx(r.settleTx) ? html`<a href="${txUrl(r.settleTx)}" rel="noopener">${s("liquidación", "settlement")}</a>` : ""}</p><p class="tiny">${s("Huella del recibo", "Receipt fingerprint")}: <span class="mono">${str(r.receiptHash, 80)}</span></p><p class="tiny">${s("Comprobante informativo. No reemplaza la factura ni el recibo que corresponda según tu situación impositiva.", "For information. It does not replace the invoice or receipt your tax situation requires.")}</p><button class="btn ghost noprint" type="button" id="print" hidden>${s("Imprimir o guardar en PDF", "Print or save as PDF")}</button></section>${
-    decisionCard(X, r, id, month)}${r.builderTest ? html`<div class="note">${s("Recibo de prueba de Swift Bot Labs: este alquiler lo pagamos nosotros para probar el ciclo completo. No hay propietario ni inquilino reales.", "Swift Bot Labs test receipt: we paid this rent ourselves to run the full cycle. There is no real landlord or tenant.")}</div>` : ""}`;
+  const body = html`${probar && !r.builderTest ? html`<div class="note">${s("Recibo de una prueba abierta de Al Día: quien pagó es también el propietario.", "Receipt of an Al Día open test: the payer is also the landlord.")} <a href="${u(`/probar/${probar}`)}">${s("Ver los pasos", "See the steps")}</a>.</div>` : ""}<div class="cols"><section class="card doc"><div class="doc-head"><div><p class="kicker">${label}</p><h1>${s(`Recibo de ${X.month(month)}`, `Receipt for ${X.month(month)}`)}</h1></div>${isTx(r.settleTx) ? html`<span class="chip ok">${icon("check")}${s("Liquidado", "Settled")}</span>` : ""}</div><div class="amount">${X.ars(r.received)}</div><dl class="kv"><dt>${s("Alquiler del mes", "Rent for the month")}</dt><dd>${X.ars(r.amount)}</dd><dt>${s("Cobrado el", "Collected on")}</dt><dd>${X.dayMonth(r.paidAt)}</dd><dt>${s("Comisión Al Día", "Al Día fee")}</dt><dd>${X.ars(r.fee)}</dd><dt>${s("Al propietario en pesos", "To the landlord in pesos")}</dt><dd>${X.ars(r.pesoToLandlord)}</dd><dt>${s("Al propietario en dólares", "To the landlord in dollars")}</dt><dd>${fin(r.dollarToLandlord) && r.dollarToLandlord ? X.usd(r.dollarToLandlord) : "—"}</dd>${
+    rate ? html`<dt>${s("Tipo de cambio", "Exchange rate")}</dt><dd>${X.ars2(rate)} ${s("por USD₮", "per USD₮")}</dd><dt>${s("Convertido en", "Converted on")}</dt><dd>${agentText(X, r.route, 40)}</dd>` : ""}</dl><details open><summary>${s("Cómo se calculó el monto", "How the amount was worked out")}</summary>${explainRent(X, r.detail)}</details><p class="small muted proofline" style="margin-top:14px">${s("Comprobantes en la red Celo", "Proof on Celo")}: ${
+    pays.map((t, i) => html`<a href="${txUrl(t)}" rel="noopener">${s("pago", "payment")} ${i + 1}</a>, `)}${isTx(r.settleTx) ? html`<a href="${txUrl(r.settleTx)}" rel="noopener">${s("liquidación", "settlement")}</a>` : ""}</p><p class="tiny">${s("Huella del recibo", "Receipt fingerprint")}: <span class="mono">${str(r.receiptHash, 80)}</span></p><p class="tiny">${s("Comprobante informativo. No reemplaza la factura ni el recibo que corresponda según tu situación impositiva.", "For information. It does not replace the invoice or receipt your tax situation requires.")}</p><button class="btn ghost noprint" type="button" id="print" hidden>${s("Imprimir o guardar en PDF", "Print or save as PDF")}</button></section><aside class="stack">${
+    decisionCard(X, r, id, month)}${r.builderTest ? html`<div class="note">${s("Recibo de prueba de Swift Bot Labs: este alquiler lo pagamos nosotros para probar el ciclo completo. No hay propietario ni inquilino reales.", "Swift Bot Labs test receipt: we paid this rent ourselves to run the full cycle. There is no real landlord or tenant.")}</div>` : ""}</aside></div>`;
   const desc = [s(`Cobrado ${X.ars(r.received)}${isDay(r.paidAt) ? ` el ${X.dayMonth(r.paidAt)}` : ""}.`, `Collected ${X.ars(r.received)}${isDay(r.paidAt) ? ` on ${X.dayMonth(r.paidAt)}` : ""}.`)];
   if (fin(r.pesoToLandlord)) desc.push(s(`Al propietario: ${X.ars(r.pesoToLandlord)}${fin(r.dollarToLandlord) && r.dollarToLandlord ? ` y ${X.usd(r.dollarToLandlord)}${r.route ? ` vía ${str(r.route, 40)}` : ""}` : ""}.`,
     `To the landlord: ${X.ars(r.pesoToLandlord)}${fin(r.dollarToLandlord) && r.dollarToLandlord ? ` and ${X.usd(r.dollarToLandlord)}${r.route ? ` via ${agentText(X, r.route, 40)}` : ""}` : ""}.`));
@@ -695,7 +774,7 @@ async function pageReceipt(env, id, month, X) {
 function pageNew(X) {
   const { s, u } = X;
   return {
-    title: s("Cargar contrato · Al Día", "Load a lease · Al Día"),
+    title: s("Cargar contrato · Al Día", "Load a lease · Al Día"), narrow: true,
     description: s("Cargá tu contrato de alquiler en tres pasos: monto, índice y billetera. Si lo tenés en PDF, lo leemos en tu teléfono. Costo: 0,3 % de cada alquiler cobrado.",
       "Load your rental lease in three steps: amount, index and wallet. If it is a PDF, we read it on your phone. Cost: 0.3% of each rent collected."),
     body: html`<h1>${s("Cargá tu contrato", "Load your lease")}</h1><div class="card"><p>${s("Son tres pasos: los datos del contrato (monto, fecha de inicio, índice y cada cuánto aumenta), un nombre para la propiedad y la billetera donde cobrás. Si tenés el contrato en PDF, lo leemos en tu teléfono y completamos los datos para que los revises.", "Three steps: the lease terms (amount, start date, index and how often it goes up), a name for the property and the wallet you get paid in. If you have the lease as a PDF, we read it on your phone and fill in the terms for you to check.")}</p><p class="small muted">${s("El agente crea la cuenta del contrato en la red Celo recién cuando entra el primer pago.", "The agent deploys the lease account on Celo only when the first payment arrives.")}</p></div><div class="note">${s("Costo: 0,3 % de cada alquiler cobrado. Sin abono ni permanencia.", "Cost: 0.3% of each rent collected. No subscription, no lock-in.")}</div><noscript><div class="note warn">${s("Para cargar un contrato hace falta JavaScript. La ", "Loading a lease needs JavaScript. The ")}<a href="${u("/calculadora")}">${s("calculadora", "calculator")}</a>${s(" funciona sin él.", " works without it.")}</div></noscript>`,
@@ -705,7 +784,7 @@ function pageNew(X) {
 function pagePanel(X) {
   const { s } = X;
   return {
-    title: s("Tu contrato · Al Día", "Your lease · Al Día"),
+    title: s("Tu contrato · Al Día", "Your lease · Al Día"), narrow: true,
     description: s("Panel privado del propietario: el link para el inquilino, los avisos, cómo cobrás y el historial. Se abre solo con el link guardado.", "The landlord's private panel: the tenant link, reminders, how you get paid and the history. It opens only with the saved link."),
     noindex: true,
     body: html`<h1>${s("Tu contrato", "Your lease")}</h1><p class="muted">${s("Este panel es privado: se abre con el link que guardaste cuando creaste el contrato.", "This panel is private: it opens with the link you saved when you created the lease.")}</p><noscript><div class="note warn">${s("Para abrir el panel hace falta JavaScript: la clave de tu link privado se queda en tu teléfono y nunca llega a nuestro servidor.", "The panel needs JavaScript: the key in your private link stays on your phone and never reaches our server.")}</div></noscript>`,
@@ -714,7 +793,7 @@ function pagePanel(X) {
 
 function pageMissing(X) {
   const { s, u } = X;
-  return { status: 404, title: s("Esta página no existe · Al Día", "This page does not exist · Al Día"), description: s("Esta página no existe.", "This page does not exist."), noindex: true, ssr: false,
+  return { status: 404, narrow: true, title: s("Esta página no existe · Al Día", "This page does not exist · Al Día"), description: s("Esta página no existe.", "This page does not exist."), noindex: true, ssr: false,
     body: html`<h1>${s("Esta página no existe", "This page does not exist")}</h1><p><a href="${u("/")}">${s("Volver al inicio", "Back to the start")}</a></p>` };
 }
 
@@ -725,7 +804,7 @@ export async function renderPage(url, env, waitUntil) {
   const X = fmt(lang);
   let m;
   let page;
-  if (path === "/") page = await pageHome(env, X, waitUntil);
+  if (path === "/") page = await pageHome(env, X, waitUntil, url.origin);
   else if (path === "/calculadora") page = await pageCalc(env, url, X);
   else if (path === "/nuevo") page = pageNew(X);
   else if (path === "/transparencia") page = await pageTransparency(env, X, waitUntil);
