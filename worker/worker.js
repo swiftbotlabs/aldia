@@ -1,10 +1,11 @@
 // Al Día public site and API on Cloudflare Workers. Holds no keys and moves no money: it stores what people type and
 // shows what the agent publishes. The agent runs elsewhere and reaches this Worker over outbound HTTPS only.
 import { ASSETS } from "./assets.js";
-import { renderPage, renderLlms, testRents, probarId, cleanOutside } from "./pages.js";
+import { renderPage, renderLlms, testRents, probarId, cleanOutside, calcInput } from "./pages.js";
 import { renderProbar, probarApi, probarTerms, LIMITS as PROBAR_LIMITS } from "./probar.js";
 import { outsideSummary, RAMP_WALLETS, RAMP_TOLERANCE_PCT } from "./outside.js";
 import { checksumOk } from "./eip55.js";
+import { countCalc, calcStats, INDEX_TYPES } from "./calcstats.js";
 
 const MAX_BODY = 40_000;
 const AGENT_WALLET = "0xed120aec2240a25125b3f32eb8bff9c5f688121b";
@@ -285,6 +286,46 @@ async function agentApi(req, env, path) {
   return fail(404, "not_found", "no");
 }
 
+// Counting calculator use must never slow or break a page: the KV write runs after the response when it can.
+async function countUse(req, env, url, ev, ctx) {
+  try {
+    const c = await countCalc(req, env, url, ev);
+    if (c.done) {
+      if (ctx && ctx.waitUntil) ctx.waitUntil(c.done);
+      else await c.done;
+    }
+  } catch (e) {
+    console.log("calcstats", String(e).slice(0, 120));
+  }
+}
+
+// POST /api/calc-ping?i=ipc|icl|fijo from the live calculator: no body, no cookies, only the index type.
+// True when a request carries any body bytes, whatever its headers say. Reads at most a few chunks, then stops.
+async function hasBody(req) {
+  const len = req.headers.get("content-length");
+  if (len !== null && len !== "0") return true;
+  if (!req.body) return false;
+  const reader = req.body.getReader();
+  try {
+    for (let i = 0; i < 4; i++) {
+      const { value, done } = await reader.read();
+      if (done) return false;
+      if (value && value.byteLength > 0) return true;
+    }
+    return true;
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+}
+
+async function calcPing(req, env, url, ctx) {
+  if (await hasBody(req)) return fail(413, "no_body", "no");
+  const i = url.searchParams.get("i");
+  if (!INDEX_TYPES.includes(i) || [...url.searchParams.keys()].some((k) => k !== "i" && k !== "test")) return fail(400, "index", "no");
+  await countUse(req, env, url, { kind: "ping", index: i }, ctx);
+  return new Response(null, { status: 204, headers: { "cache-control": "no-store", ...SECURITY } });
+}
+
 async function kvJson(env, key, fallback = null) {
   const raw = await env.KV.get(key);
   return raw ? json(JSON.parse(raw)) : fallback;
@@ -298,7 +339,9 @@ async function api(req, env, path, ctx) {
   }
   if (path === "/api/leases" && req.method === "POST") return createLease(req, env);
   if (path === "/api/leer" && req.method === "POST") return createRead(req, env);
+  if (path === "/api/calc-ping" && req.method === "POST") return calcPing(req, env, new URL(req.url), ctx);
   if (req.method !== "GET") return fail(405, "method", "no");
+  if (path === "/api/calc-stats") return json(await calcStats(env), 200, { "cache-control": "public, max-age=60" });
   if (path === "/api/indices") return (await kvJson(env, "indices")) || fail(503, "not_ready", "Todavía no hay índices.");
   if (path === "/api/stats") return (await kvJson(env, "stats")) || json({});
   if (path === "/api/health") return (await kvJson(env, "health")) || json({});
@@ -372,6 +415,7 @@ export default {
       if (path === "/index.html") return new Response(null, { status: 301, headers: { location: "/", ...SECURITY } });
       const a = asset(path);
       if (a) return a;
+      if (path === "/calculadora" && req.method === "GET") await countUse(req, env, url, { kind: "page", lease: calcInput(url.searchParams).lease }, ctx);
       // Every page is rendered here with its real content; the browser app takes over when JavaScript runs.
       const page = await renderPage(url, env, waitUntil);
       return new Response(page.html, { status: page.status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=60", ...SECURITY } });

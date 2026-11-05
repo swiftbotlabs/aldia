@@ -50,7 +50,7 @@ Every page is in Spanish by default and in English with `?lang=en` (the ES/EN sw
 4. **See who really used it.** The [transparency page](https://aldia.swiftbotlab.workers.dev/transparencia?lang=en) separates our tests from real use.
 5. **Create a lease.** [Load a lease](https://aldia.swiftbotlab.workers.dev/nuevo?lang=en) takes about a minute. The agent creates the on-chain account only when the first payment arrives, so an unused lease costs nothing.
 6. **Pay a real rent yourself.** [Try it](https://aldia.swiftbotlab.workers.dev/probar?lang=en): enter your Celo address and pay a 1,000 wARS (about US$0.60) test rent in about two minutes, from a wallet or by bank transfer through Ripio (Argentina). Your address is the landlord, so 997 wARS come back to you, less the 0.3% fee. It runs through the same lease contract, agent and receipt as a real rent.
-7. **Read it without a browser.** Every public page is rendered on the server, so `curl` shows the same numbers and transaction links as the app. [/llms.txt](https://aldia.swiftbotlab.workers.dev/llms.txt) is a plain-text summary with the steps to check each claim on chain.
+7. **Read it without a browser.** Every public page is rendered on the server, so `curl` shows the same numbers and transaction links as the app. [/llms.txt](https://aldia.swiftbotlab.workers.dev/llms.txt) is a plain-text summary with the steps to check each claim on chain. Use of the free calculator is counted from 5 Nov 2026 without storing IPs or inputs and shown on the transparency page; daily totals at [/api/calc-stats](https://aldia.swiftbotlab.workers.dev/api/calc-stats).
 
 ## Where users and volume came from
 

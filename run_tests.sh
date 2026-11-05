@@ -7,4 +7,5 @@ PY=${PY:-/home/agent/agent/wallet-venv/bin/python}
 python3 -I ops/deploy_worker.py --bundle-only
 node tests/test_web.mjs
 node tests/test_probar.mjs
+node tests/test_calc_counter.mjs
 (cd contracts && HOME=/home/agent/agent/.sbxhome /home/agent/agent/foundry/bin/forge test --offline 2>&1 | tail -3)

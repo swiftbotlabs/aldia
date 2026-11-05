@@ -5,6 +5,7 @@
 // from the official index series with the same rent.js the browser uses. Nothing here moves money or holds a key.
 import { AlDiaRent } from "./rent.mjs";
 import { outsideSummary, CUTOFF_DAY, RAMP_TOLERANCE_PCT } from "./outside.js";
+import { calcStats, CALC_SINCE, DEDUPE_MS } from "./calcstats.js";
 
 const { addMonths, rentForMonth, termsFromDetail } = AlDiaRent;
 
@@ -501,6 +502,28 @@ async function pageCalc(env, url, X) {
   };
 }
 
+// Use of the free calculator by visitors, from worker/calcstats.js. One sentence, the same on /transparencia (ES, EN).
+export function calcUseLine(X, c) {
+  if (!c || !Number.isInteger(c.calculations) || !Number.isInteger(c.pageViews)) return "";
+  const since = X.en ? new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(CALC_SINCE + "T12:00:00Z")) : X.dayMonth(CALC_SINCE);
+  const N = c.calculations;
+  const M = c.pageViews;
+  return X.s(`Calculadora: ${X.num(N)} ${N === 1 ? "cálculo" : "cálculos"} de visitantes desde el ${since} (${X.num(M)} ${M === 1 ? "visita" : "visitas"} a la página), contados sin guardar IP ni datos ingresados.`,
+    `Calculator: ${X.num(N)} ${N === 1 ? "calculation" : "calculations"} by visitors since ${since} (${X.num(M)} page ${M === 1 ? "view" : "views"}), counted without storing IPs or inputs.`);
+}
+function calcUseCard(X, c) {
+  const { s } = X;
+  const line = calcUseLine(X, c);
+  if (!line) return "";
+  const b = c.byIndex || {};
+  const mins = DEDUPE_MS / 60000;
+  const capped = Array.isArray(c.cappedDays) ? c.cappedDays.length : 0;
+  return html`<section class="card" id="uso-calculadora"><h3>${s("Uso de la calculadora", "Calculator use")}</h3><p class="small" id="calc-uso">${line}</p><p class="tiny" style="margin:0">${s(
+    `Por índice: IPC ${X.num(b.ipc)}, ICL ${X.num(b.icl)}, porcentaje fijo ${X.num(b.fijo)}. Cómo contamos: guardamos solo totales por día. Un cálculo es el formulario enviado con un alquiler y una fecha (funciona sin JavaScript) o un resultado de la calculadora en vivo, que avisa solo el tipo de índice. Cada visitante cuenta una vez por índice cada ${mins} minutos, y sus visitas una vez: para eso usamos un hash de la IP con una sal aleatoria, que vive ${mins} minutos en memoria y nunca se escribe. No contamos nuestras pruebas (?test=1), bots, navegadores sin pantalla, nuestros monitores ni el enlace de ejemplo que publicamos.`,
+    `By index: IPC ${X.num(b.ipc)}, ICL ${X.num(b.icl)}, fixed percentage ${X.num(b.fijo)}. How we count: only daily totals are stored. A calculation is the form sent with a rent and a start date (works without JavaScript) or a result shown by the live calculator, which reports only the index type. Each visitor counts once per index every ${mins} minutes, and their page views once: for that we use a salted hash of the IP address that lives ${mins} minutes in memory and is never written down. Our own tests (?test=1), bots, headless browsers, our monitors and the example link we publish are left out.`)}${
+    capped ? s(` En ${capped} ${capped === 1 ? "día" : "días"} el conteo se detuvo antes de terminar el día por el límite de escrituras.`, ` On ${capped} ${capped === 1 ? "day" : "days"} counting stopped early at the daily write limit.`) : ""} <a href="/api/calc-stats">${s("Totales por día (JSON)", "Daily totals (JSON)")}</a>.</p></section>`;
+}
+
 function rentsTable(X, rents) {
   const { s, u } = X;
   if (!rents.length) return "";
@@ -511,7 +534,7 @@ function rentsTable(X, rents) {
 
 async function pageTransparency(env, X, waitUntil) {
   const { s } = X;
-  const [s0, idx, rents, o0, health] = await Promise.all([kv(env, "stats"), kv(env, "indices"), testRents(env), outsideSummary(env, waitUntil), kv(env, "health")]);
+  const [s0, idx, rents, o0, health, cu] = await Promise.all([kv(env, "stats"), kv(env, "indices"), testRents(env), outsideSummary(env, waitUntil), kv(env, "health"), calcStats(env).catch(() => null)]);
   const o = cleanOutside(o0);
   const st = s0 || {};
   const n = (v) => (Number.isInteger(v) ? v : "—");
@@ -541,6 +564,7 @@ async function pageTransparency(env, X, waitUntil) {
 <section class="card" style="margin-top:14px"><h3>${s("De dónde salen estos números", "Where these numbers come from")}</h3><p class="small">${s("Un pago cuenta como externo solo si pasa el control de abajo, que se hace solo con datos públicos de la red. Nuestras pruebas se cuentan aparte, como pruebas nuestras.", "A payment counts as outside only if it passes the check below, which uses public chain data alone. Our tests are counted separately, as ours.")}</p>${
     counts ? html`<p class="small" id="conteo">${testLeaseLine(X, counts, null)}</p>` : ""}${
     st.updatedAt ? html`<p class="tiny" style="margin:0">${s("Los números del agente cambiaron por última vez el", "The agent's numbers last changed on")} ${str(st.updatedAt, 30)}.</p>` : ""}</section>
+${calcUseCard(X, cu)}
 ${outsideCard(X, o)}
 ${ipcLastOk ? html`<section class="card"><h3>${s("Índices oficiales", "Official indices")}</h3><dl class="kv"><dt>${s("Último IPC", "Latest IPC")}</dt><dd>${X.month(idx.ipcLast)}: ${X.pctf(idx.ipcMonthlyPct[idx.ipcLast], 1)}</dd><dt>${s("Nivel", "Level")}</dt><dd>${fin(idx.ipc[idx.ipcLast]) ? new Intl.NumberFormat(X.loc).format(idx.ipc[idx.ipcLast]) : "—"}</dd><dt>${s("Controles", "Checks")}</dt><dd>${idx.ok ? s("Las fuentes coinciden", "The sources agree") : s("Hay una diferencia: el agente no emite aumentos", "They disagree: the agent issues no increase")}</dd><dt>${s("Leído el", "Read on")}</dt><dd>${str(idx.retrievedAt, 16).replace("T", " ")} UTC</dd></dl><p class="small muted" style="margin-top:10px">${s("IPC: archivo de INDEC, comparado contra la API de series del Ministerio de Economía y la variable 27 del BCRA. ICL: variable 40 del BCRA.", "IPC: INDEC's file, checked against the Ministry of Economy series API and BCRA variable 27. ICL: BCRA variable 40.")}</p></section>` : ""}
 <section class="card"><h3>${s("En la red", "On chain")}</h3><dl class="kv"><dt>${s("Agente", "Agent")}</dt><dd><a href="${LINKS.erc8004}" rel="noopener">ERC-8004 ${s(`n.º ${ONCHAIN.agentId}`, `#${ONCHAIN.agentId}`)}</a></dd><dt>${s("Billetera del agente", "Agent wallet")}</dt><dd><a href="${addrUrl(ONCHAIN.agentWallet)}" rel="noopener" class="mono">${short(ONCHAIN.agentWallet)}</a></dd><dt>${s("Fábrica de cuentas", "Lease factory")}</dt><dd><a href="${addrUrl(ONCHAIN.factory.toLowerCase())}" rel="noopener" class="mono">${short(ONCHAIN.factory.toLowerCase())}</a></dd></dl>${
@@ -716,7 +740,7 @@ export async function renderPage(url, env, waitUntil) {
 // Plain text for language models and for judges who read without a browser. English, with the page names.
 export async function renderLlms(url, env, waitUntil) {
   const o = url.origin;
-  const [s0, idx, pub, rents, out0] = await Promise.all([kv(env, "stats"), kv(env, "indices"), kv(env, `pub:${SAMPLE_TENANT}`), testRents(env), outsideSummary(env, waitUntil)]);
+  const [s0, idx, pub, rents, out0, cu] = await Promise.all([kv(env, "stats"), kv(env, "indices"), kv(env, `pub:${SAMPLE_TENANT}`), testRents(env), outsideSummary(env, waitUntil), calcStats(env).catch(() => null)]);
   const out = cleanOutside(out0);
   const s = s0 || {};
   const n = (v) => (Number.isInteger(v) ? String(v) : "unknown");
@@ -736,6 +760,10 @@ export async function renderLlms(url, env, waitUntil) {
   if (out.notCounted.length) L.push(`- Payments not counted: ${out.notCounted.length} (${[...new Set(out.notCounted.map((r) => REASONS.en[r.reason]))].join("; ")}).`);
   const tc = testLeaseCounts(s, rents);
   L.push(`- Builder-test leases: ${n(s.leasesTest)}. Builder-test payments: ${n(s.paymentsTest)}.${tc ? ` ${testLeaseLine(fmt("en"), tc, null).replace(/^\d+ test leases? of ours: /, "Of the leases, ")}` : ""}${tc ? "" : " We funded these payments from our own wallet;"} ${tc ? "They are" : "they are"} labelled as tests on every page and never counted as outside payers.`);
+  if (cu && Number.isInteger(cu.calculations)) {
+    const b = cu.byIndex || {};
+    L.push(`- Free calculator use since ${CALC_SINCE}: ${cu.calculations} calculations by visitors (${cu.pageViews} page views without inputs; IPC ${n(b.ipc)}, ICL ${n(b.icl)}, fixed ${n(b.fijo)}), counted without storing IPs or inputs: daily totals only, one per visitor and index every ${DEDUPE_MS / 60000} minutes (a salted IP hash held in memory, never written), our own tests (?test=1), bots and monitors left out. Daily totals: ${o}/api/calc-stats`);
+  }
   if (s.updatedAt) L.push(`- Agent stats last changed: ${str(s.updatedAt, 30)}.${out.checkedAt ? ` Outside payers checked: ${out.checkedAt.slice(0, 16).replace("T", " ")} UTC.` : ""}`);
   L.push(`- Open test, anyone with a Celo wallet: ${o}/probar?lang=en . Pay a real 1,000 wARS rent (about US$0.60) with your own address as the landlord, from a wallet or by bank transfer through Ripio; the agent settles it and 997 wARS come back to you (0.3% fee).`, "");
   L.push("## How to verify it on chain (Celo mainnet, chain id 42220)");
@@ -777,7 +805,7 @@ export async function renderLlms(url, env, waitUntil) {
   L.push(`- Sample receipt: ${o}/recibo/${SAMPLE_RECEIPT.id}/${SAMPLE_RECEIPT.month}?lang=en , ICL rent settled through Textile FX, with payment and settlement transactions and the agent's venue decision.`);
   L.push(`- Create a lease: ${o}/nuevo?lang=en (needs JavaScript; the agent deploys the lease contract only when the first payment arrives).`, "");
   L.push("## Data (JSON, the same records the pages use)");
-  L.push(`- ${o}/api/stats , ${o}/api/indices , ${o}/api/pruebas , ${o}/api/externos`);
+  L.push(`- ${o}/api/stats , ${o}/api/indices , ${o}/api/pruebas , ${o}/api/externos , ${o}/api/calc-stats`);
   L.push(`- ${o}/api/lease/<id> , ${o}/api/recibo/<id>/<YYYY-MM>`);
   L.push(`- ${o}/agent.json (ERC-8004 registration file)`, "");
   L.push("## Links");

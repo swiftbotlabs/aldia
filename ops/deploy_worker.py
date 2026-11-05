@@ -11,7 +11,7 @@ NAME = "aldia"
 ENV = "/home/agent/agent/secrets/aldia_worker.env"
 # Our other wallets, excluded from the outside-payer count. Outside the public repo; the deploy refuses to run without it.
 EXTRA_OURS = os.path.join(os.path.dirname(ROOT), "private", "aldia_extra_ours.txt")
-MODULES = ["worker.js", "assets.js", "pages.js", "rent.mjs", "outside.js", "probar.js", "eip55.js"]
+MODULES = ["worker.js", "assets.js", "pages.js", "rent.mjs", "outside.js", "probar.js", "eip55.js", "calcstats.js"]
 TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
          ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json; charset=utf-8", ".mp4": "video/mp4"}
 

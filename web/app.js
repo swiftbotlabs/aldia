@@ -178,6 +178,22 @@ function calcStart() {
   };
 }
 
+// Anonymous use count: once per index type per page load, 2 s after a result settles, the calculator tells the Worker
+// only which index it used (no inputs, no cookies). Not sent on ?test=1 (our own checks), nor for the result a link's
+// inputs bring on load (the Worker already counted that request). See worker/calcstats.js.
+const CALC_TEST = new URLSearchParams(location.search).get("test") === "1";
+const calcPinged = new Set();
+let calcPingTimer = 0;
+function calcPing(index) {
+  clearTimeout(calcPingTimer);
+  const i = String(index).toLowerCase();
+  if (CALC_TEST || calcPinged.has(i) || !["ipc", "icl", "fijo"].includes(i)) return;
+  calcPingTimer = setTimeout(() => {
+    calcPinged.add(i);
+    fetch(`/api/calc-ping?i=${i}`, { method: "POST", keepalive: true, credentials: "omit" }).catch(() => {});
+  }, 2000);
+}
+
 async function viewCalc() {
   document.title = S("Calculadora de aumento de alquiler · Al Día", "Rent increase calculator · Al Día");
   const s = calcStart();
@@ -186,14 +202,14 @@ async function viewCalc() {
     const base = parseInt(String(s.baseRent).replace(/\D/g, ""), 10);
     if (!base || !s.startDate) {
       result.replaceChildren();
-      return;
+      return false;
     }
     const lease = { ...s, baseRent: base, fixedPct: parseFloat(String(s.fixedPct).replace(",", ".")) || 0 };
     const m = nowMonth();
     const r = rentForMonth(lease, m, idx);
     if (!r) {
       result.replaceChildren(h("div", { class: "note" }, S("El contrato todavía no empezó.", "The lease has not started yet.")));
-      return;
+      return false;
     }
     const next = addMonths(r.adjustmentMonth, lease.periodMonths);
     result.replaceChildren(h("div", { class: "card", id: "calc-result" },
@@ -202,6 +218,7 @@ async function viewCalc() {
       explainRent(r),
       h("p", { class: "muted small", style: "margin-top:12px" }, `${S("Próximo aumento", "Next increase")}: ${monthName(next)}.`),
       h("a", { class: "btn block", href: U("/nuevo") }, S("Que se haga solo todos los meses", "Have it done for you every month"))));
+    return true;
   }
   const head = [h("h1", {}, S("Calculadora de aumento", "Rent increase calculator")), h("p", { class: "muted" }, S("Gratis y con datos oficiales. No hace falta registrarse.", "Free, official data, no sign-up."))];
   loading(...head, h("div", { class: "card", id: "calc" }, h("p", { class: "muted" }, S("Cargando índices…", "Loading the indices…"))));
@@ -213,7 +230,13 @@ async function viewCalc() {
     shell(...head, h("div", { class: "card", id: "calc" }, h("div", { class: "note err" }, S("No pudimos traer los índices. Probá en un rato.", "We could not load the indices. Please try again later."))));
     return;
   }
-  const run = () => compute(idx);
+  // Every edit calls run(); only an edit that ends in a result is counted, and only once per index type.
+  const run = (byUser = true) => {
+    const ok = compute(idx);
+    if (!byUser) return;
+    if (ok) calcPing(s.index);
+    else clearTimeout(calcPingTimer);
+  };
   const fixedRow = h("div", { style: s.index === "FIJO" ? "" : "display:none" }, field(S("Porcentaje de cada aumento", "Percentage of each increase"), h("input", { inputmode: "decimal", placeholder: "10", value: s.fixedPct, oninput: (e) => { s.fixedPct = e.target.value; run(); } })));
   const lagRow = h("div", { style: s.index === "IPC" ? "" : "display:none" }, field(S("Meses de IPC", "IPC months"), selectEl(s.lagMonths, LAGS, (v) => { s.lagMonths = +v; run(); })));
   const example = h("div", {});
@@ -226,7 +249,7 @@ async function viewCalc() {
       lagRow, fixedRow,
       h("p", { class: "tiny", style: "margin:12px 0 0" }, S(`IPC disponible hasta ${monthName(idx.ipcLast)}. Datos leídos de INDEC y BCRA el ${idx.retrievedAt.slice(0, 10)}.`, `IPC available up to ${monthName(idx.ipcLast)}. Data read from INDEC and BCRA on ${idx.retrievedAt.slice(0, 10)}.`))),
     result, example);
-  run();
+  run(false);
   const card = exampleCard(workedExample(await pubP, idx));
   if (card) example.replaceChildren(card);
 }
