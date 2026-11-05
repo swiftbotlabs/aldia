@@ -4,7 +4,7 @@
 
 A small landlord in Argentina loads a rental contract once. Every month the agent works out the rent from the official index, the tenant pays by ordinary bank transfer, and the money lands as wARS in a contract that can only pay the landlord. The agent then reconciles the payment, moves the share the landlord chose into USD₮ at the better of Textile FX and Uniswap, and issues the receipt.
 
-Live: **https://aldia.swiftbotlab.workers.dev** (in Argentine Spanish, built for a phone)
+Live: **https://aldia.swiftbotlab.workers.dev** (in Argentine Spanish, built for a phone; English on every page with `?lang=en`)
 
 Demo video: **https://youtu.be/DmCQoeQxLME** (1:34)
 
@@ -55,6 +55,8 @@ Every page is in Spanish by default and in English with `?lang=en` (the ES/EN sw
 ## Where users and volume came from
 
 > [!IMPORTANT]
+> **Counts as of 5 November 2026:** 6 test leases of ours: 4 paid and settled on Celo, 8,961 wARS in all, paid from our own wallet; 2 never paid (the sample tenant page's lease, and an open-test lease we made on 4 November). Outside payers: 0. The demo video and the first screenshots date from 1 November, when there were 5. Live counts: [transparency page](https://aldia.swiftbotlab.workers.dev/transparencia?lang=en).
+>
 > **No independent user has paid through Al Día yet.** Every lease and payment listed below is a builder test: we funded the payments from our own agent wallet, and those leases carry a test label on the site. Nothing here is presented as customer volume. The transparency page counts an outside payer only after an automatic check on Celo's public explorer (Blockscout): the payment came straight from a wallet that is not ours, whose first funds did not come from one of our wallets, and whose first Celo activity is before 6 October 2026, the hackathon's independent-user rule. Anything that cannot be proven is not counted, and payments that fail the check are listed with the reason. Payers from the open test at `/probar` are labelled "fellow hackathon builder" when we cannot tell who they are.
 >
 > **Rents paid by bank transfer through Ripio** arrive from Ripio's own wallet, not the tenant's, so the wallet rule above would score Ripio's hot wallet as one "payer" and merge every tenant into it. They have their own rule ([`worker/outside.js`](worker/outside.js), `rampMonth`): the wARS came from a known Ripio ramp wallet and that same wallet signed the transaction; the lease is not a builder test, and its landlord (the payout address in the Worker's own lease record) is not one of our wallets and never received anything from one of our wallets up to the payment; and what Ripio delivered that month is within 2% of the charge the tenant page asked for (the month's rent, or what was still owed after other payments that month). We have no Ripio account. Each ramp-paid lease counts once per landlord, in its own line on the transparency page; no landlord or Ripio address is published. Ripio's delivery wallet, `0x0f776cc057622f0da2f257d2b987a7cf3386b7cc`, was identified from public chain data (active since February 2025, refilled with wARS by one treasury wallet, paying round peso amounts to dozens of unrelated wallets), not confirmed by Ripio.
@@ -84,7 +86,7 @@ The tenant path through Ripio's ramp link is built and counted by the rule above
 | Stablecoin gas | CIP-64 is implemented and [tested once](https://celoscan.io/tx/0x8c67010e073adace6180efd6c3358d26a9f7637c12847ecc0479a6d806407957). It is switched off in normal running. |
 | MiniPay | The tenant page detects an injected wallet and pays wARS with one tap. Tested with a wallet stub, not yet inside MiniPay itself. |
 
-Contracts, verified on Sourcify with an exact match: [AlDiaFactory](https://celoscan.io/address/0x1e7CBf5d31c85B168048115d0aE762463A475882) `0x1e7CBf5d31c85B168048115d0aE762463A475882` and its [AlDiaLease implementation](https://celoscan.io/address/0x90C1F1e91C21f2f166317B6e8A9292B9dF707759) `0x90C1F1e91C21f2f166317B6e8A9292B9dF707759`. An earlier factory, `0x4690e265fD2d542e1B44aC7ba41f796a474b11c1`, had a one-window floor; a security review found that weak, so new leases use the two-window version. The first three test rents below ran on the old factory. Agent wallet: `0xED120aeC2240A25125B3f32Eb8Bff9C5F688121b`.
+Contracts, verified on Sourcify with an exact match: [AlDiaFactory](https://celoscan.io/address/0x1e7CBf5d31c85B168048115d0aE762463A475882) `0x1e7CBf5d31c85B168048115d0aE762463A475882` and its [AlDiaLease implementation](https://celoscan.io/address/0x90C1F1e91C21f2f166317B6e8A9292B9dF707759) `0x90C1F1e91C21f2f166317B6e8A9292B9dF707759`. An earlier factory, `0x4690e265fD2d542e1B44aC7ba41f796a474b11c1`, had a one-window floor; a security review found that weak, so new leases use the two-window version. The first three test rents above ran on the old factory. Agent wallet: `0xED120aeC2240A25125B3f32Eb8Bff9C5F688121b`.
 
 ## Services we pay for
 

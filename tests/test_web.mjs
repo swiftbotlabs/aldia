@@ -297,6 +297,36 @@ for (const want of ["Contrato y recibo de prueba nuestros, con índices oficiale
   assert.ok(ht.includes(want), "home discloses: " + want);
 }
 assert.ok(!hb.includes('class="note warn"'), "no warning banner on the home page");
+// The first screen says what it does for the landlord and for the tenant, before the tenant card.
+assert.ok(ht.includes("Para propietarios en Argentina: el agente calcula cada aumento") && ht.includes("Tu inquilino ve cuánto paga y por qué, y paga por transferencia") && hb.indexOf("Tu inquilino ve cuánto paga") < hb.indexOf('<div class="amount">'), "home lead: landlord and tenant, first");
+assert.ok(ht.includes("El alquiler nunca pasa por la billetera del agente; a ella solo va la comisión del 0,3 %."), "custody answer names the fee");
+
+// ---------- One count of our test leases, the same sentence on the home page, the transparency page and llms.txt ----------
+{
+  const wantEs = "5 contratos de prueba nuestros: 4 cobrados y liquidados en Celo, 8.961 wARS en total, pagados desde nuestra billetera; 1 nunca se pagó.";
+  const wantEn = "5 test leases of ours: 4 paid and settled on Celo, 8,961 wARS in all, paid from our own wallet; 1 never paid.";
+  const txt = async (u) => textOf((await page(u)).body).replaceAll(NB, " ");
+  assert.ok(ht.includes(wantEs), "home: test-lease count");
+  assert.ok((await txt("/?lang=en")).includes(wantEn), "home (en): test-lease count");
+  const tEs = await txt("/transparencia");
+  assert.ok(tEs.includes(wantEs), "transparency: test-lease count");
+  assert.ok((await txt("/transparencia?lang=en")).includes(wantEn), "transparency (en): test-lease count");
+  // each test lease says whether it was paid: the four with a settled receipt, and the PDF lease that never was
+  assert.strictEqual((tEs.match(/prueba nuestra · cobrado/g) || []).length, 4, "four test leases marked paid");
+  assert.strictEqual((tEs.match(/prueba nuestra · sin pago/g) || []).length, 1, "one test lease marked never paid");
+  assert.ok(/Prueba: contrato leído de un PDF prueba nuestra · sin pago/.test(tEs), "the never-paid one is the PDF lease");
+  const lt2 = await (await call("/llms.txt")).text();
+  assert.ok(lt2.includes("- Builder-test leases: 5. Builder-test payments: 4. Of the leases, 4 paid and settled on Celo, 8,961 wARS in all, paid from our own wallet; 1 never paid. They are labelled as tests on every page and never counted as outside payers."), "llms.txt: same count");
+  // Positive control: when the receipts do not account for every test payment the agent counted, no page prints the
+  // sentence or a paid/never-paid status; the plain counts stay.
+  kv.set("stats", JSON.stringify({ ...st, paymentsTest: 5 }));
+  const off = await txt("/transparencia");
+  assert.ok(!off.includes("nunca se pag") && !off.includes("· sin pago") && !off.includes("· cobrado"), "no sentence or status when the records disagree");
+  assert.ok((await txt("/")).includes("(5 contratos de prueba)"), "home falls back to the plain count");
+  assert.ok(!(await (await call("/llms.txt")).text()).includes("Of the leases,"), "llms.txt falls back too");
+  kv.set("stats", JSON.stringify(st));
+  assert.ok((await txt("/transparencia")).includes(wantEs), "restored");
+}
 // the one-line proof is shown only when the published levels give exactly the amount charged (positive control: tamper one level)
 kv.set(`pub:${pages.SAMPLE_TENANT}`, JSON.stringify({ ...tenant, current: { ...tenant.current, detail: { ...tenant.current.detail, levelTo: 99999 } } }));
 assert.ok(!textOf((await page("/")).body).includes("× 1,201778"), "a line that does not add up is not shown");

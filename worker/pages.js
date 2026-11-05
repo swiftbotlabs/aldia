@@ -182,6 +182,32 @@ export async function testRents(env) {
   return rows.filter(Boolean);
 }
 
+// Our own test leases, counted the same way on every page and in llms.txt: how many there are (the agent's stats), how
+// many were paid and settled on Celo and the pesos received (the published receipts), and how many were never paid.
+// Returns null when the two records disagree (more paid leases than leases, or receipts that do not account for every test
+// payment the agent counted), so no page prints a sum that does not add up.
+export function testLeaseCounts(st, rents) {
+  const leases = st && Number.isInteger(st.leasesTest) && st.leasesTest >= 0 ? st.leasesTest : null;
+  if (leases === null || !Array.isArray(rents)) return null;
+  const paid = new Set(rents.map((r) => r.id)).size;
+  if (paid > leases) return null;
+  const pays = rents.reduce((a, r) => a + (Array.isArray(r.paymentTxs) ? r.paymentTxs.length : 0), 0);
+  if (!Number.isInteger(st.paymentsTest) || pays !== st.paymentsTest) return null;
+  const wars = rents.reduce((a, r) => a + (fin(r.received) ? r.received : 0), 0);
+  return { leases, paid, unpaid: leases - paid, wars };
+}
+
+// The sentence itself, in Spanish or English. `when` is the agent's own "last changed" stamp, when it has one.
+export function testLeaseLine(X, c, when) {
+  if (!c) return "";
+  const { s } = X;
+  const w = when ? s(` (al ${when})`, ` (as of ${when})`) : "";
+  const es1 = (k, one, many) => `${k} ${k === 1 ? one : many}`;
+  return s(
+    `${es1(c.leases, "contrato de prueba nuestro", "contratos de prueba nuestros")}${w}: ${es1(c.paid, "cobrado y liquidado", "cobrados y liquidados")} en Celo, ${X.num(c.wars)} wARS en total, pagados desde nuestra billetera; ${es1(c.unpaid, "nunca se pagó", "nunca se pagaron")}.`,
+    `${c.leases} test ${c.leases === 1 ? "lease" : "leases"} of ours${w}: ${c.paid} paid and settled on Celo, ${X.num(c.wars)} wARS in all, paid from our own wallet; ${c.unpaid} never paid.`);
+}
+
 /* ---------- page frame ---------- */
 const CHROME = {
   es: { html: "es-AR", og: "es_AR", calc: "Calculadora", probar: "Probar", other: "EN", otherName: "English", otherLang: "en",
@@ -334,9 +360,10 @@ function outsideCard(X, o) {
 // What is and is not real yet follows right after, in its own panel.
 async function pageHome(env, X, waitUntil) {
   const { s, u } = X;
-  const [pub, rec, st0, o0] = await Promise.all([kv(env, `pub:${SAMPLE_TENANT}`), kv(env, `receipt:${SAMPLE_RECEIPT.id}:${SAMPLE_RECEIPT.month}`), kv(env, "stats"), outsideSummary(env, waitUntil)]);
+  const [pub, rec, st0, o0, rents] = await Promise.all([kv(env, `pub:${SAMPLE_TENANT}`), kv(env, `receipt:${SAMPLE_RECEIPT.id}:${SAMPLE_RECEIPT.month}`), kv(env, "stats"), outsideSummary(env, waitUntil), testRents(env)]);
   const o = cleanOutside(o0);
   const st = st0 || {};
+  const counts = testLeaseCounts(st, rents);
   const c = pub && pub.current && typeof pub.current === "object" && fin(pub.current.amount) && isMonth(pub.current.month) ? pub.current : null;
   const d = c && c.detail && typeof c.detail === "object" ? c.detail : null;
   // The one-line proof of the amount, shown only when the published levels give exactly the amount charged.
@@ -356,8 +383,8 @@ async function pageHome(env, X, waitUntil) {
     `Receipt: ${X.ars(r.received)} collected on ${X.dayMonth(r.paidAt)}${r.index === "ICL" || r.index === "IPC" ? ` (${r.index})` : ""}; the landlord got ${payoutPhrase(X, r)}.`)}</span></a>` : "";
   const sample = c || r ? html`<p class="tiny" style="margin:8px 0 0">${s("Contrato y recibo de prueba nuestros, con índices oficiales reales.", "Our own test lease and receipt, with the real official indices.")} <a href="#real">${s("Qué es real hoy", "What is real today")}</a></p>` : "";
   const hero = html`<section class="hero home"><h1>${s("El alquiler que se actualiza y se cobra solo.", "Rent that updates and collects itself.")}</h1><p class="lead">${s(
-    "Para propietarios en Argentina: un agente en Celo calcula cada aumento con el índice oficial, cobra en pesos y deja el recibo.",
-    "For landlords in Argentina: an agent on Celo works out each increase from the official index, collects in pesos and issues the receipt.")}</p>${demo}${receipt}${sample}
+    "Para propietarios en Argentina: el agente calcula cada aumento con el índice oficial, cobra en pesos y te pasa a dólares la parte que elijas. Tu inquilino ve cuánto paga y por qué, y paga por transferencia, como siempre.",
+    "For landlords in Argentina: the agent works out each increase from the official index, collects the rent in pesos and turns the share you choose into dollars. Your tenant sees what is due and why, and pays by bank transfer.")}</p>${demo}${receipt}${sample}
 <a class="btn block cta" href="${u("/probar")}">${s("Probalo en 2 minutos", "Try it in 2 minutes")} →</a>
 <p class="small muted" style="margin:8px 0 0">${s("Pagás 1.000 wARS (unos US$ 0,60) a un contrato real en Celo y te vuelven 997 con su recibo.", "Pay 1,000 wARS (about US$0.60) into a real lease on Celo and get 997 back, with a receipt.")}</p>
 <p class="small proof"><a href="${LINKS.video}" rel="noopener">▶ ${s("Ver el video (1:34)", "Watch the video (1:34)")}</a> · ${s("Agente en Celo", "Agent on Celo")} <a href="${LINKS.erc8004}" rel="noopener">ERC-8004 ${s(`n.º ${ONCHAIN.agentId}`, `#${ONCHAIN.agentId}`)}</a> · ${s("cada pago con comprobante en la red", "every payment with an onchain receipt")}</p></section>`;
@@ -366,15 +393,15 @@ async function pageHome(env, X, waitUntil) {
   const rampDone = o.rampPayments > 0;
   const real = html`<section class="card real" id="real"><h2>${s("Qué es real hoy", "What is real today")}</h2><ul>
 <li><b>${s("En la red principal de Celo, con wARS reales:", "On Celo mainnet, with real wARS:")}</b> ${s(`el agente (ERC-8004 n.º ${ONCHAIN.agentId}), sus contratos verificados y ${n(st.paymentsTest)} alquileres cobrados y liquidados, cada uno con su recibo y sus operaciones.`, `the agent (ERC-8004 #${ONCHAIN.agentId}), its verified contracts and ${n(st.paymentsTest)} rents collected and settled, each with its receipt and transactions.`)}</li>
-<li><b>${s("Esos alquileres son pruebas nuestras.", "Those rents are our own tests.")}</b> ${s(`Los pagamos nosotros para probar el ciclo completo (${n(st.leasesTest)} contratos de prueba). Todavía no hay un propietario ni un inquilino reales.`, `We paid them ourselves to run the full cycle (${n(st.leasesTest)} test leases). There is no real landlord or tenant yet.`)}</li>
+<li><b>${s("Esos alquileres son pruebas nuestras.", "Those rents are our own tests.")}</b> ${counts ? testLeaseLine(X, counts, null) : s(`Los pagamos nosotros para probar el ciclo completo (${n(st.leasesTest)} contratos de prueba).`, `We paid them ourselves to run the full cycle (${n(st.leasesTest)} test leases).`)} ${s("Todavía no hay un propietario ni un inquilino reales.", "There is no real landlord or tenant yet.")}</li>
 <li><b>${s(`Pagadores externos verificados: ${o.count}.`, `Verified outside payers: ${o.count}.`)}</b> ${s("Se cuentan solo después de un control automático en el explorador público de Celo.", "They are counted only after an automatic check on Celo's public explorer.")} <a href="${u("/transparencia#externos")}">${s("Ver la regla y la lista", "See the rule and the list")}</a>.</li>
 <li><b>${s("Pago por transferencia vía Ripio:", "Bank transfer through Ripio:")}</b> ${rampDone ? s(`${o.rampPayments} pago(s) verificados por este camino.`, `${o.rampPayments} verified payment(s) this way.`) : s("armado y conectado, pero ningún inquilino real lo completó todavía de punta a punta.", "built and wired in, but no real tenant has completed it end to end yet.")}</li>
 <li><b>MiniPay</b> ${s("probado con un simulador de billetera, todavía no dentro de MiniPay. El gas en dólares digitales está hecho y probado una vez, apagado en uso normal.", "tested with a wallet stub, not yet inside MiniPay. Gas paid in digital dollars is built and was tested once; it is off in normal running.")}</li>
 </ul><p class="small" style="margin:0"><a href="${u("/transparencia")}">${s("Todo, con su fuente, en Transparencia", "Everything, with its source, on the Transparency page")}</a></p></section>`;
-  const problem = html`<section class="card"><h2>${s("Lo que deja de ser tu problema", "What stops being your problem")}</h2><p>${s("Buscar el IPC del trimestre, hacer la cuenta, mandar el mensaje, mirar el banco para ver si pagó, armar el recibo y correr a comprar dólares antes de que se devalúe. Todo eso lo hace el agente, todos los meses, y lo deja a la vista de las dos partes.", "Looking up the quarter's IPC, doing the maths, sending the message, checking the bank to see whether the tenant paid, writing the receipt and rushing to buy dollars before the peso slides. The agent does all of that every month, in plain view of both sides.")}</p><p class="muted small">${s("El cálculo usa solo fuentes oficiales: INDEC para el IPC y el BCRA para el ICL. Si esas fuentes no coinciden entre sí, el agente no emite el aumento hasta que se aclare.", "Only official sources are used: INDEC for IPC and the central bank (BCRA) for ICL. If the sources disagree, the agent holds the increase until they match.")}</p><div class="row"><a class="btn ghost" href="${u("/nuevo")}">${s("Cargar mi contrato", "Load my lease")}</a><a class="btn ghost" href="${u("/calculadora")}">${s("Calcular un aumento", "Work out an increase")}</a></div></section>`;
+  const problem = html`<section class="card"><h2>${s("Lo que deja de ser tu problema", "What stops being your problem")}</h2><p>${s("Buscar el IPC del trimestre, hacer la cuenta, mandar el mensaje, mirar el banco para ver si pagó, armar el recibo y correr a comprar dólares antes de que se devalúe. Todo eso lo hace el agente, todos los meses, y lo deja a la vista de las dos partes.", "Looking up the quarter's IPC, doing the maths, sending the message, checking the bank to see whether the tenant paid, writing the receipt and rushing to buy dollars before the peso slides. The agent does all of that every month, in plain view of both sides.")}</p><p class="muted small">${s("El cálculo usa solo fuentes oficiales: INDEC para el IPC y el BCRA para el ICL. El IPC del INDEC se compara con otras dos series oficiales (Ministerio de Economía y BCRA); si no coinciden, el agente no emite ningún cobro nuevo hasta que coincidan.", "Only official sources are used: INDEC for IPC and the central bank (BCRA) for ICL. INDEC's IPC is checked against two other official series (Ministry of Economy and BCRA); if they disagree, the agent issues no new charge until they match.")}</p><div class="row"><a class="btn ghost" href="${u("/nuevo")}">${s("Cargar mi contrato", "Load my lease")}</a><a class="btn ghost" href="${u("/calculadora")}">${s("Calcular un aumento", "Work out an increase")}</a></div></section>`;
   const faq = [
     [s("¿Mi inquilino necesita saber de cripto?", "Does my tenant need to know about crypto?"), s("No. Paga por transferencia a través de Ripio, que convierte los pesos en wARS, un peso digital 1 a 1. La primera vez Ripio le pide validar su identidad.", "No. They pay by bank transfer through Ripio, which turns the pesos into wARS, a digital peso worth one peso. The first time, Ripio asks them to verify their identity.")],
-    [s("¿Quién tiene la plata?", "Who holds the money?"), s("Cada contrato tiene su propia cuenta en la red Celo, un contrato inteligente que solo te puede pagar a vos. El agente puede repartir lo cobrado, pero no puede mandarlo a otro lado, y vos podés retirar todo o sacarlo del medio cuando quieras.", "Each lease has its own account on Celo, a smart contract that can only pay you. The agent can split what came in but cannot send it anywhere else, and you can withdraw everything or remove the agent at any time.")],
+    [s("¿Quién tiene la plata?", "Who holds the money?"), s("Cada contrato tiene su propia cuenta en la red Celo, un contrato inteligente que solo te puede pagar a vos. El alquiler nunca pasa por la billetera del agente; a ella solo va la comisión del 0,3 %. El agente puede repartir lo cobrado, pero no puede mandarlo a otro lado, y vos podés retirar todo o sacarlo del medio cuando quieras.", "Each lease has its own account on Celo, a smart contract that can only pay you. The rent never passes through the agent's wallet; only the 0.3% fee goes there. The agent can split what came in but cannot send it anywhere else, and you can withdraw everything or remove the agent at any time.")],
     [s("¿Qué necesito para cobrar?", "What do I need to get paid?"), s("Una billetera compatible con Celo, como MiniPay, Valora o MetaMask. Después podés pasar los pesos a tu banco con Ripio.", "A wallet that works on Celo, such as MiniPay, Valora or MetaMask. You can move the pesos to your bank with Ripio afterwards.")],
     [s("¿Cuánto cuesta?", "What does it cost?"), s("0,3 % de cada alquiler cobrado. Se descuenta solo y lo ves en cada recibo. Calcular aumentos con la calculadora es gratis.", "0.3% of each rent collected, taken automatically and shown on every receipt. The calculator is free.")],
     [s("¿Puedo usarlo con mi contrato actual?", "Can I use it with my current lease?"), s("Sí, si las dos partes están de acuerdo. Al Día no cambia el contrato: aplica lo que dice. Revisá que el índice y los meses que usamos coincidan con tu cláusula.", "Yes, if both sides agree. Al Día does not change the lease, it applies what it says. Check that the index and the months we use match your clause.")],
@@ -492,6 +519,15 @@ async function pageTransparency(env, X, waitUntil) {
   const calls = st.paidCalls && Number.isInteger(st.paidCalls.count) ? st.paidCalls : null;
   const recent = calls && Array.isArray(calls.recent) ? calls.recent.filter((c) => c && typeof c === "object").slice(0, 20) : [];
   const leases = Array.isArray(st.leases) ? st.leases.filter((l) => l && typeof l === "object").slice(0, 12) : [];
+  const counts = testLeaseCounts(st, rents);
+  // Which of our test leases were paid: each settled receipt marks one lease with the same label, at most once.
+  const paidLabels = rents.map((r) => r.label);
+  const leasePaid = leases.map((l) => {
+    const i = paidLabels.indexOf(str(l.label, 80));
+    if (i < 0) return false;
+    paidLabels.splice(i, 1);
+    return true;
+  });
   const at = health && isDay(health.at) ? str(health.at, 24).slice(0, 16).replace("T", " ") : null;
   const fresh = [at ? s(`el agente dio su última vuelta a las ${at} UTC`, `the agent's last check ran at ${at} UTC`) : null,
     o.checkedAt ? s(`la revisión de pagadores externos corrió a las ${o.checkedAt.slice(0, 16).replace("T", " ")} UTC`, `the outside-payer check ran at ${o.checkedAt.slice(0, 16).replace("T", " ")} UTC`) : null].filter(Boolean);
@@ -503,11 +539,12 @@ async function pageTransparency(env, X, waitUntil) {
     tile(o.count, s("pagadores externos verificados", "verified outside payers"))}${
     tile(o.payments, s("pagos externos verificados", "verified outside payments"))}</section>
 <section class="card" style="margin-top:14px"><h3>${s("De dónde salen estos números", "Where these numbers come from")}</h3><p class="small">${s("Un pago cuenta como externo solo si pasa el control de abajo, que se hace solo con datos públicos de la red. Nuestras pruebas se cuentan aparte, como pruebas nuestras.", "A payment counts as outside only if it passes the check below, which uses public chain data alone. Our tests are counted separately, as ours.")}</p>${
+    counts ? html`<p class="small" id="conteo">${testLeaseLine(X, counts, null)}</p>` : ""}${
     st.updatedAt ? html`<p class="tiny" style="margin:0">${s("Los números del agente cambiaron por última vez el", "The agent's numbers last changed on")} ${str(st.updatedAt, 30)}.</p>` : ""}</section>
 ${outsideCard(X, o)}
 ${ipcLastOk ? html`<section class="card"><h3>${s("Índices oficiales", "Official indices")}</h3><dl class="kv"><dt>${s("Último IPC", "Latest IPC")}</dt><dd>${X.month(idx.ipcLast)}: ${X.pctf(idx.ipcMonthlyPct[idx.ipcLast], 1)}</dd><dt>${s("Nivel", "Level")}</dt><dd>${fin(idx.ipc[idx.ipcLast]) ? new Intl.NumberFormat(X.loc).format(idx.ipc[idx.ipcLast]) : "—"}</dd><dt>${s("Controles", "Checks")}</dt><dd>${idx.ok ? s("Las fuentes coinciden", "The sources agree") : s("Hay una diferencia: el agente no emite aumentos", "They disagree: the agent issues no increase")}</dd><dt>${s("Leído el", "Read on")}</dt><dd>${str(idx.retrievedAt, 16).replace("T", " ")} UTC</dd></dl><p class="small muted" style="margin-top:10px">${s("IPC: archivo de INDEC, comparado contra la API de series del Ministerio de Economía y la variable 27 del BCRA. ICL: variable 40 del BCRA.", "IPC: INDEC's file, checked against the Ministry of Economy series API and BCRA variable 27. ICL: BCRA variable 40.")}</p></section>` : ""}
 <section class="card"><h3>${s("En la red", "On chain")}</h3><dl class="kv"><dt>${s("Agente", "Agent")}</dt><dd><a href="${LINKS.erc8004}" rel="noopener">ERC-8004 ${s(`n.º ${ONCHAIN.agentId}`, `#${ONCHAIN.agentId}`)}</a></dd><dt>${s("Billetera del agente", "Agent wallet")}</dt><dd><a href="${addrUrl(ONCHAIN.agentWallet)}" rel="noopener" class="mono">${short(ONCHAIN.agentWallet)}</a></dd><dt>${s("Fábrica de cuentas", "Lease factory")}</dt><dd><a href="${addrUrl(ONCHAIN.factory.toLowerCase())}" rel="noopener" class="mono">${short(ONCHAIN.factory.toLowerCase())}</a></dd></dl>${
-    leases.length ? html`<table style="margin-top:10px">${leases.map((l) => html`<tr><td>${agentText(X, l.label, 80)}</td><td class="r">${agentText(X, l.kind, 40)}</td></tr>`)}</table>` : ""}</section>
+    leases.length ? html`<table style="margin-top:10px">${leases.map((l, i) => html`<tr><td>${agentText(X, l.label, 80)}</td><td class="r">${agentText(X, l.kind, 40)}${counts ? (leasePaid[i] ? s(" · cobrado", " · paid") : s(" · sin pago", " · never paid")) : ""}</td></tr>`)}</table>` : ""}</section>
 ${rentsTable(X, rents)}
 ${calls ? html`<section class="card"><h3>${s("Servicios que pagamos", "Services we paid for")}</h3><p class="small muted">${s(`${calls.count} llamadas pagas por x402 en Celo, por ${X.usd3(calls.usd)} en total, desde la billetera del agente.`, `${calls.count} paid x402 calls on Celo, ${X.usd3(calls.usd)} in total, from the agent wallet.`)}</p><table>${recent.map((c) => html`<tr><td>${agentText(X, c.service, 120)}</td><td class="r">${X.usd3(c.usd)}</td><td class="r">${isTx(c.tx) ? html`<a href="${txUrl(c.tx)}" rel="noopener">tx</a>` : "—"}</td></tr>`)}</table></section>` : ""}`;
   const parts = [s(`Pagadores externos verificados: ${o.count}. Pagos externos verificados: ${o.payments}. Pruebas nuestras: ${n(st.leasesTest)} contratos y ${n(st.paymentsTest)} pagos.`,
@@ -697,7 +734,8 @@ export async function renderLlms(url, env, waitUntil) {
   for (const p of out.payers) L.push(`   - ${short(p.address)}, paid ${p.date || "unknown"}, on Celo since ${p.firstSeen ? p.firstSeen.slice(0, 7) : "unknown"}: ${txUrl(p.tx)}${p.receipt ? ` , receipt ${o}${p.receipt}` : ""}`);
   for (const r of out.ramp) L.push(`   - Bank transfer through Ripio, ${r.wars === null ? "unknown" : r.wars} wARS, ${r.date || "unknown"}: ${txUrl(r.tx)}${r.receipt ? ` , receipt ${o}${r.receipt}` : ""}`);
   if (out.notCounted.length) L.push(`- Payments not counted: ${out.notCounted.length} (${[...new Set(out.notCounted.map((r) => REASONS.en[r.reason]))].join("; ")}).`);
-  L.push(`- Builder-test leases: ${n(s.leasesTest)}. Builder-test payments: ${n(s.paymentsTest)}. We funded these payments from our own wallet; they are labelled as tests on every page and never counted as outside payers.`);
+  const tc = testLeaseCounts(s, rents);
+  L.push(`- Builder-test leases: ${n(s.leasesTest)}. Builder-test payments: ${n(s.paymentsTest)}.${tc ? ` ${testLeaseLine(fmt("en"), tc, null).replace(/^\d+ test leases? of ours: /, "Of the leases, ")}` : ""}${tc ? "" : " We funded these payments from our own wallet;"} ${tc ? "They are" : "they are"} labelled as tests on every page and never counted as outside payers.`);
   if (s.updatedAt) L.push(`- Agent stats last changed: ${str(s.updatedAt, 30)}.${out.checkedAt ? ` Outside payers checked: ${out.checkedAt.slice(0, 16).replace("T", " ")} UTC.` : ""}`);
   L.push(`- Open test, anyone with a Celo wallet: ${o}/probar?lang=en . Pay a real 1,000 wARS rent (about US$0.60) with your own address as the landlord, from a wallet or by bank transfer through Ripio; the agent settles it and 997 wARS come back to you (0.3% fee).`, "");
   L.push("## How to verify it on chain (Celo mainnet, chain id 42220)");
